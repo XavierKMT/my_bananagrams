@@ -1,0 +1,85 @@
+.tile {
+  width: 60px;
+  height: 60px;
+  position: absolute;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.tile-face {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(145deg, #F5E6D3 0%, #E8D4B8 100%);
+  border-radius: 4px;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.2),
+    0 4px 8px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid rgba(139, 115, 85, 0.3);
+}
+
+.tile.dragging .tile-face {
+  box-shadow:
+    0 8px 16px rgba(0, 0, 0, 0.3),
+    0 12px 24px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.tile.grouped .tile-face {
+  background: linear-gradient(145deg, #d6c6b1 0%, #d4bd9a 100%);
+  border: 2px solid transparent;
+}
+
+.tile.grouped .tile-face.group-border-top {
+  border-top-color: #5B9BD5;
+}
+
+.tile.grouped .tile-face.group-border-right {
+  border-right-color: #5B9BD5;
+}
+
+.tile.grouped .tile-face.group-border-bottom {
+  border-bottom-color: #5B9BD5;
+}
+
+.tile.grouped .tile-face.group-border-left {
+  border-left-color: #5B9BD5;
+}
+
+.tile-letter {
+  font-size: 32px;
+  font-weight: 700;
+  color: #2C1810;
+  font-family: 'Georgia', serif;
+  letter-spacing: -1px;
+}
+
+@media (max-width: 768px) {
+  .tile {
+    width: 50px;
+    height: 50px;
+  }
+
+  .tile-letter {
+    font-size: 26px;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
