@@ -1,16 +1,27 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Tile from './Tile';
+import dictionaryText from './dictionary.txt?raw';
 import './App.css';
+
+const BOARD_TILE_LIMIT = 100;
 
 function App() {
   const [tiles, setTiles] = useState([]);
   const [bagTiles, setBagTiles] = useState([]);
+  const [useDictionary, setUseDictionary] = useState(false);
+  const [dumpMode, setDumpMode] = useState(false);
+  const [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
+  const [isPanningCamera, setIsPanningCamera] = useState(false);
   const [groups, setGroups] = useState(new Map()); // Map of tileId -> groupId
   const [detachedTileIds, setDetachedTileIds] = useState(new Set());
   const tileElementsRef = useRef(new Map());
+  const playAreaRef = useRef(null);
   const tilesRef = useRef(tiles);
   const groupsRef = useRef(groups);
   const detachedTileIdsRef = useRef(detachedTileIds);
+  const cameraRef = useRef(camera);
+  const activePointersRef = useRef(new Map());
+  const cameraGestureRef = useRef({ mode: null });
   const dragSessionRef = useRef(null);
   const isDraggingAnyRef = useRef(false);
   const cachedBorderSidesRef = useRef(new Map());
@@ -45,6 +56,8 @@ function App() {
     setTiles([]);
     setGroups(new Map());
     setDetachedTileIds(new Set());
+    setDumpMode(false);
+    centerCameraOnBoard();
   };
 
   useEffect(() => {
@@ -59,7 +72,81 @@ function App() {
     detachedTileIdsRef.current = detachedTileIds;
   }, [detachedTileIds]);
 
+  useEffect(() => {
+    cameraRef.current = camera;
+  }, [camera]);
+
   const getTileSize = useCallback(() => (window.innerWidth <= 768 ? 50 : 60), []);
+  const clampScale = useCallback((value) => Math.min(2.5, Math.max(0.5, value)), []);
+  const getBoardSize = useCallback(() => getTileSize() * BOARD_TILE_LIMIT, [getTileSize]);
+
+  const getPlayAreaRect = useCallback(() => {
+    return playAreaRef.current?.getBoundingClientRect() || {
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight,
+    };
+  }, []);
+
+  const clampCameraToBoard = useCallback((nextCamera) => {
+    const { width: viewportW, height: viewportH } = getPlayAreaRect();
+    const boardSize = getBoardSize();
+    const scaledBoardW = boardSize * nextCamera.scale;
+    const scaledBoardH = boardSize * nextCamera.scale;
+
+    let clampedX;
+    let clampedY;
+
+    if (scaledBoardW <= viewportW) {
+      clampedX = (viewportW - scaledBoardW) / 2;
+    } else {
+      const minX = viewportW - scaledBoardW;
+      clampedX = Math.min(0, Math.max(minX, nextCamera.x));
+    }
+
+    if (scaledBoardH <= viewportH) {
+      clampedY = (viewportH - scaledBoardH) / 2;
+    } else {
+      const minY = viewportH - scaledBoardH;
+      clampedY = Math.min(0, Math.max(minY, nextCamera.y));
+    }
+
+    return {
+      x: clampedX,
+      y: clampedY,
+      scale: nextCamera.scale,
+    };
+  }, [getBoardSize, getPlayAreaRect]);
+
+  const updateCamera = useCallback((nextCamera) => {
+    const clampedCamera = clampCameraToBoard(nextCamera);
+    cameraRef.current = clampedCamera;
+    setCamera(clampedCamera);
+  }, [clampCameraToBoard]);
+
+  const centerCameraOnBoard = useCallback(() => {
+    const { width: viewportW, height: viewportH } = getPlayAreaRect();
+    const boardSize = getBoardSize();
+
+    updateCamera({
+      x: (viewportW - boardSize) / 2,
+      y: (viewportH - boardSize) / 2,
+      scale: 1,
+    });
+  }, [getBoardSize, getPlayAreaRect, updateCamera]);
+
+  const screenToBoard = useCallback((clientX, clientY) => {
+    const { left, top } = getPlayAreaRect();
+    const { x, y, scale } = cameraRef.current;
+    const localX = clientX - left;
+    const localY = clientY - top;
+
+    return {
+      x: (localX - x) / scale,
+      y: (localY - y) / scale,
+    };
+  }, [getPlayAreaRect]);
 
   const registerTileElement = useCallback((tileId, node) => {
     if (node) {
@@ -108,26 +195,96 @@ function App() {
     isDraggingAnyRef.current = true;
   }, []);
 
+  const placeTilesInVisibleRegion = useCallback((drawnTiles, existingTiles) => {
+    const tileSize = getTileSize();
+    const boardSize = getBoardSize();
+    const margin = 10;
+    const step = tileSize + 6; // grid step with a small gap between tiles
+    const { width: viewportW, height: viewportH } = getPlayAreaRect();
+    const { x: cameraX, y: cameraY, scale: cameraScale } = cameraRef.current;
+    const visibleLeft = (0 - cameraX) / cameraScale;
+    const visibleTop = (0 - cameraY) / cameraScale;
+    const visibleRight = (viewportW - cameraX) / cameraScale;
+    const visibleBottom = (viewportH - cameraY) / cameraScale;
+
+    const minX = Math.max(0, visibleLeft + margin);
+    const minY = Math.max(0, visibleTop + margin);
+    const maxX = Math.min(boardSize - tileSize, visibleRight - margin - tileSize);
+    const maxY = Math.min(boardSize - tileSize, visibleBottom - margin - tileSize);
+
+    const occupiedPositions = existingTiles.map((tile) => tile.position);
+    const placedTiles = [];
+
+    const isFree = (x, y) => {
+      if (x < 0 || x + tileSize > boardSize) return false;
+      if (y < 0 || y + tileSize > boardSize) return false;
+
+      return !occupiedPositions.some((pos) => (
+        Math.abs(pos.x - x) < tileSize - 2 &&
+        Math.abs(pos.y - y) < tileSize - 2
+      ));
+    };
+
+    drawnTiles.forEach((tile) => {
+      let placed = false;
+
+      for (let rowOffset = 0; !placed; rowOffset++) {
+        const y = maxY - rowOffset * step;
+        if (y < minY) break;
+
+        for (let x = minX; x <= maxX; x += step) {
+          if (isFree(x, y)) {
+            const pos = { x, y };
+            occupiedPositions.push(pos);
+            placedTiles.push({ ...tile, position: pos });
+            placed = true;
+            break;
+          }
+        }
+      }
+
+      if (!placed) {
+        const fallbackMax = Math.max(0, boardSize - tileSize);
+        const pos = {
+          x: Math.random() * fallbackMax,
+          y: Math.random() * fallbackMax,
+        };
+        occupiedPositions.push(pos);
+        placedTiles.push({ ...tile, position: pos });
+      }
+    });
+
+    return placedTiles;
+  }, [getBoardSize, getPlayAreaRect, getTileSize]);
+
   const drawTiles = (count) => {
     if (bagTiles.length === 0) return;
 
-    // Take tiles from bag
     const toDraw = Math.min(count, bagTiles.length);
     const drawn = bagTiles.slice(0, toDraw);
     const remaining = bagTiles.slice(toDraw);
+    const newTiles = placeTilesInVisibleRegion(drawn, tiles);
 
-    // Position them at bottom of screen in a row
-    const newTiles = drawn.map((tile, idx) => ({
-      ...tile,
-      position: {
-        x: 100 + (idx * 70),
-        y: window.innerHeight - 200
-      }
-    }));
-
-    setTiles([...tiles, ...newTiles]);
+    setTiles((prev) => [...prev, ...newTiles]);
     setBagTiles(remaining);
   };
+
+  const hasUngroupedTiles = useMemo(() => {
+    return tiles.some((tile) => groups.get(tile.id) === undefined);
+  }, [tiles, groups]);
+
+  const handleDumpModeToggle = useCallback(() => {
+    if (dumpMode) {
+      setDumpMode(false);
+      return;
+    }
+
+    if (bagTiles.length < 3) {
+      return;
+    }
+
+    setDumpMode(true);
+  }, [bagTiles.length, dumpMode]);
 
   const isAdjacent = useCallback((pos1, pos2, tileSize = 60) => {
     // Keep group detection aligned with the snap model: tileSize + 1px gap.
@@ -193,6 +350,44 @@ function App() {
 
     setGroups(groupMap);
   }, [getTileSize, isAdjacent]);
+
+  const handleDumpTileSelect = useCallback((tileId) => {
+    if (!dumpMode) return;
+    if (bagTiles.length < 3) return;
+    if (groups.has(tileId)) return;
+
+    const tileToDump = tiles.find((tile) => tile.id === tileId);
+    if (!tileToDump) return;
+
+    const remainingTiles = tiles.filter((tile) => tile.id !== tileId);
+    const nextBag = [...bagTiles, tileToDump];
+
+    for (let i = nextBag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [nextBag[i], nextBag[j]] = [nextBag[j], nextBag[i]];
+    }
+
+    const drawn = nextBag.slice(0, 3);
+    const remainingBag = nextBag.slice(3);
+    const replacementTiles = placeTilesInVisibleRegion(drawn, remainingTiles);
+    const updatedTiles = [...remainingTiles, ...replacementTiles];
+
+    const nextDetachedIds = new Set(detachedTileIdsRef.current);
+    nextDetachedIds.delete(tileId);
+
+    setTiles(updatedTiles);
+    setBagTiles(remainingBag);
+    setDetachedTileIds(nextDetachedIds);
+    detachedTileIdsRef.current = nextDetachedIds;
+    setDumpMode(false);
+    formGroups(updatedTiles, nextDetachedIds);
+  }, [bagTiles, dumpMode, formGroups, groups, placeTilesInVisibleRegion, tiles]);
+
+  useEffect(() => {
+    if (dumpMode && !hasUngroupedTiles) {
+      setDumpMode(false);
+    }
+  }, [dumpMode, hasUngroupedTiles]);
 
   const checkCollision = useCallback((movedTilePositions, stationaryTiles, tileSize = 60) => {
     const collisionThreshold = tileSize * 0.6; // Tiles collide if centers closer than this
@@ -275,6 +470,13 @@ function App() {
 
   const updateTilePosition = useCallback((id, newPosition, isDragging) => {
     const tileSize = getTileSize();
+    const boardSize = getBoardSize();
+    const maxTileCoordinate = boardSize - tileSize;
+
+    const clampPositionToBoard = (position) => ({
+      x: Math.max(0, Math.min(maxTileCoordinate, position.x)),
+      y: Math.max(0, Math.min(maxTileCoordinate, position.y)),
+    });
 
     if (isDragging) {
       if (!dragSessionRef.current || dragSessionRef.current.tileId !== id) {
@@ -323,19 +525,43 @@ function App() {
       const deltaX = rawDeltaX + (snapCorrection ? snapCorrection.x : 0);
       const deltaY = rawDeltaY + (snapCorrection ? snapCorrection.y : 0);
 
+      let boundedDeltaX = deltaX;
+      let boundedDeltaY = deltaY;
+
+      if (session.movedTileIds.length > 0) {
+        const movedCurrentPositions = session.movedTileIds
+          .map((tileId) => session.currentPositions.get(tileId))
+          .filter(Boolean);
+
+        if (movedCurrentPositions.length > 0) {
+          const minX = Math.min(...movedCurrentPositions.map((pos) => pos.x));
+          const minY = Math.min(...movedCurrentPositions.map((pos) => pos.y));
+          const maxX = Math.max(...movedCurrentPositions.map((pos) => pos.x));
+          const maxY = Math.max(...movedCurrentPositions.map((pos) => pos.y));
+
+          const minDeltaX = -minX;
+          const maxDeltaX = maxTileCoordinate - maxX;
+          const minDeltaY = -minY;
+          const maxDeltaY = maxTileCoordinate - maxY;
+
+          boundedDeltaX = Math.max(minDeltaX, Math.min(maxDeltaX, boundedDeltaX));
+          boundedDeltaY = Math.max(minDeltaY, Math.min(maxDeltaY, boundedDeltaY));
+        }
+      }
+
       const positionToUse = {
-        x: session.currentAnchorPosition.x + deltaX,
-        y: session.currentAnchorPosition.y + deltaY,
+        x: session.currentAnchorPosition.x + boundedDeltaX,
+        y: session.currentAnchorPosition.y + boundedDeltaY,
       };
 
-      if (deltaX === 0 && deltaY === 0) return;
+      if (boundedDeltaX === 0 && boundedDeltaY === 0) return;
       // Calculate proposed positions for ALL tiles in the group
       const proposedPositions = new Map();
       session.movedTileIds.forEach((tileId) => {
         const currentPosition = session.currentPositions.get(tileId);
         proposedPositions.set(tileId, {
-          x: currentPosition.x + deltaX,
-          y: currentPosition.y + deltaY,
+          x: currentPosition.x + boundedDeltaX,
+          y: currentPosition.y + boundedDeltaY,
         });
       });
 
@@ -370,10 +596,11 @@ function App() {
         );
 
         if (snapPosition) {
-          const deltaX = snapPosition.x - session.currentAnchorPosition.x;
-          const deltaY = snapPosition.y - session.currentAnchorPosition.y;
+          const boundedSnapPosition = clampPositionToBoard(snapPosition);
+          const deltaX = boundedSnapPosition.x - session.currentAnchorPosition.x;
+          const deltaY = boundedSnapPosition.y - session.currentAnchorPosition.y;
 
-          session.currentAnchorPosition = snapPosition;
+          session.currentAnchorPosition = boundedSnapPosition;
 
           session.movedTileIds.forEach((tileId) => {
             const currentPosition = session.currentPositions.get(tileId);
@@ -389,11 +616,11 @@ function App() {
           return nextPosition ? { ...tile, position: nextPosition } : tile;
         });
       } else {
-        let positionToUse = newPosition;
+        let positionToUse = clampPositionToBoard(newPosition);
         const snapPosition = calculateSnapPosition(id, newPosition, prevTiles, tileSize);
 
         if (snapPosition) {
-          positionToUse = snapPosition;
+          positionToUse = clampPositionToBoard(snapPosition);
         }
 
         // Check if placing single tile at this position causes collision
@@ -422,22 +649,8 @@ function App() {
 
       return updatedTiles;
     });
-  }, [applyPositionToElement, calculateSnapPosition, checkCollision, formGroups, getTileSize, initializeDragSession]);
+  }, [applyPositionToElement, calculateSnapPosition, checkCollision, formGroups, getBoardSize, getTileSize, initializeDragSession]);
 
-  const shuffle = () => {
-    if (tiles.length === 0) return;
-
-    const shuffled = tiles.map(tile => ({
-      ...tile,
-      position: {
-        x: Math.random() * (window.innerWidth - 200) + 100,
-        y: Math.random() * (window.innerHeight - 400) + 100
-      }
-    }));
-
-    setTiles(shuffled);
-    formGroups(shuffled);
-  };
 
   const handleUngroupTile = useCallback((id) => {
     if (!groups.has(id)) return;
@@ -491,7 +704,6 @@ function App() {
     return sideMap;
   }, [tiles, groups, getTileSize]);
 
-  // eslint-disable-next-line no-unused-vars
   const words = useMemo(() => {
     const tileSize = getTileSize();
     const expectedDistance = tileSize + 1;
@@ -632,7 +844,245 @@ function App() {
     return detectedWords;
   }, [tiles, groups, getTileSize]);
 
+  const dictionaryWords = useMemo(() => {
+    return new Set(
+      dictionaryText
+        .split(/\r?\n/)
+        .map((word) => word.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }, []);
+
+  const tileDictionaryState = useMemo(() => {
+    if (!useDictionary) {
+      return new Map();
+    }
+
+    const stateByTileId = new Map();
+
+    words.forEach((word) => {
+      const isValid = dictionaryWords.has(word.text.toLowerCase());
+
+      word.tileIds.forEach((tileId) => {
+        const currentState = stateByTileId.get(tileId);
+
+        if (!isValid) {
+          if (currentState !== 'valid') {
+            stateByTileId.set(tileId, 'invalid');
+          }
+          return;
+        }
+
+        stateByTileId.set(tileId, 'valid');
+      });
+    });
+
+    return stateByTileId;
+  }, [dictionaryWords, useDictionary, words]);
+
+  const handlePlayAreaWheel = useCallback((event) => {
+    event.preventDefault();
+
+    const { left, top } = getPlayAreaRect();
+    const localPoint = {
+      x: event.clientX - left,
+      y: event.clientY - top,
+    };
+
+    const currentCamera = cameraRef.current;
+    const nextScale = clampScale(currentCamera.scale * Math.exp(-event.deltaY * 0.0015));
+    if (nextScale === currentCamera.scale) return;
+
+    const focalBoardPoint = {
+      x: (localPoint.x - currentCamera.x) / currentCamera.scale,
+      y: (localPoint.y - currentCamera.y) / currentCamera.scale,
+    };
+
+    updateCamera({
+      x: localPoint.x - focalBoardPoint.x * nextScale,
+      y: localPoint.y - focalBoardPoint.y * nextScale,
+      scale: nextScale,
+    });
+  }, [clampScale, getPlayAreaRect, updateCamera]);
+
+  const handlePlayAreaPointerDown = useCallback((event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (event.target.closest('.tile')) return;
+
+    const { left, top } = getPlayAreaRect();
+    const localPoint = {
+      x: event.clientX - left,
+      y: event.clientY - top,
+    };
+
+    activePointersRef.current.set(event.pointerId, localPoint);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+
+    if (event.pointerType === 'touch' && activePointersRef.current.size >= 2) {
+      const [first, second] = Array.from(activePointersRef.current.values());
+      const midpoint = {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      };
+      const dx = second.x - first.x;
+      const dy = second.y - first.y;
+      const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+      const currentCamera = cameraRef.current;
+
+      cameraGestureRef.current = {
+        mode: 'pinch',
+        startDistance: distance,
+        startScale: currentCamera.scale,
+        focalBoardPoint: {
+          x: (midpoint.x - currentCamera.x) / currentCamera.scale,
+          y: (midpoint.y - currentCamera.y) / currentCamera.scale,
+        },
+      };
+      setIsPanningCamera(true);
+      return;
+    }
+
+    cameraGestureRef.current = {
+      mode: 'pan',
+      pointerId: event.pointerId,
+      startPointer: localPoint,
+      startCamera: { ...cameraRef.current },
+    };
+    setIsPanningCamera(true);
+  }, [getPlayAreaRect]);
+
+  const handlePlayAreaPointerMove = useCallback((event) => {
+    if (!activePointersRef.current.has(event.pointerId)) return;
+
+    const { left, top } = getPlayAreaRect();
+    const localPoint = {
+      x: event.clientX - left,
+      y: event.clientY - top,
+    };
+    activePointersRef.current.set(event.pointerId, localPoint);
+
+    const gesture = cameraGestureRef.current;
+    if (!gesture.mode) return;
+
+    if (gesture.mode === 'pan') {
+      if (gesture.pointerId !== event.pointerId) return;
+
+      const deltaX = localPoint.x - gesture.startPointer.x;
+      const deltaY = localPoint.y - gesture.startPointer.y;
+
+      updateCamera({
+        x: gesture.startCamera.x + deltaX,
+        y: gesture.startCamera.y + deltaY,
+        scale: gesture.startCamera.scale,
+      });
+      return;
+    }
+
+    if (gesture.mode === 'pinch' && activePointersRef.current.size >= 2) {
+      const [first, second] = Array.from(activePointersRef.current.values());
+      const midpoint = {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      };
+      const dx = second.x - first.x;
+      const dy = second.y - first.y;
+      const nextDistance = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nextScale = clampScale(gesture.startScale * (nextDistance / gesture.startDistance));
+
+      updateCamera({
+        x: midpoint.x - gesture.focalBoardPoint.x * nextScale,
+        y: midpoint.y - gesture.focalBoardPoint.y * nextScale,
+        scale: nextScale,
+      });
+    }
+  }, [clampScale, getPlayAreaRect, updateCamera]);
+
+  const handlePlayAreaPointerUp = useCallback((event) => {
+    activePointersRef.current.delete(event.pointerId);
+
+    const remainingPointers = Array.from(activePointersRef.current.entries());
+    const gesture = cameraGestureRef.current;
+
+    if (gesture.mode === 'pinch' && remainingPointers.length === 1) {
+      const [pointerId, point] = remainingPointers[0];
+      cameraGestureRef.current = {
+        mode: 'pan',
+        pointerId,
+        startPointer: point,
+        startCamera: { ...cameraRef.current },
+      };
+      return;
+    }
+
+    if (gesture.mode === 'pan' && remainingPointers.length === 1) {
+      const [pointerId, point] = remainingPointers[0];
+      cameraGestureRef.current = {
+        mode: 'pan',
+        pointerId,
+        startPointer: point,
+        startCamera: { ...cameraRef.current },
+      };
+      return;
+    }
+
+    if (remainingPointers.length === 0) {
+      cameraGestureRef.current = { mode: null };
+      setIsPanningCamera(false);
+    }
+  }, []);
+
+  const boardTransformStyle = useMemo(() => ({
+    width: `${getBoardSize()}px`,
+    height: `${getBoardSize()}px`,
+    transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`,
+  }), [camera, getBoardSize]);
+
+  const resetView = useCallback(() => {
+    const { width: viewportW, height: viewportH } = getPlayAreaRect();
+
+    if (tiles.length === 0) {
+      centerCameraOnBoard();
+      return;
+    }
+
+    const tileSize = getTileSize();
+    const padding = 32;
+    const minX = Math.min(...tiles.map((tile) => tile.position.x));
+    const minY = Math.min(...tiles.map((tile) => tile.position.y));
+    const maxX = Math.max(...tiles.map((tile) => tile.position.x + tileSize));
+    const maxY = Math.max(...tiles.map((tile) => tile.position.y + tileSize));
+    const contentWidth = Math.max(1, maxX - minX);
+    const contentHeight = Math.max(1, maxY - minY);
+    const fitScaleX = (viewportW - (padding * 2)) / contentWidth;
+    const fitScaleY = (viewportH - (padding * 2)) / contentHeight;
+    const fitScale = clampScale(Math.min(fitScaleX, fitScaleY));
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    updateCamera({
+      x: (viewportW / 2) - (centerX * fitScale),
+      y: (viewportH / 2) - (centerY * fitScale),
+      scale: fitScale,
+    });
+  }, [centerCameraOnBoard, clampScale, getPlayAreaRect, getTileSize, tiles, updateCamera]);
+
   useEffect(() => {
+    const handleResize = () => {
+      updateCamera(cameraRef.current);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [updateCamera]);
+
+  useEffect(() => {
+    if (screen.orientation?.lock) {
+      screen.orientation.lock('portrait').catch(() => {
+        // Lock not supported or not in fullscreen — ignore
+      });
+    }
     initializeGame();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -640,52 +1090,81 @@ function App() {
   return (
     <div className="game-container">
       <div className="controls">
+        <button className="btn" onClick={initializeGame}>
+          CLEAR
+        </button>
+        <button className="btn" onClick={resetView}>
+          Fit to Tiles
+        </button>
         <button className="btn" onClick={() => drawTiles(21)}>
           Draw 21 Tiles
         </button>
-        <button className="btn" onClick={() => drawTiles(1)}>
-          Draw 1 Tile
-        </button>
-        <button className="btn" onClick={shuffle}>
-          Shuffle
-        </button>
-        <button className="btn" onClick={initializeGame}>
-          New Game
-        </button>
+        {(hasUngroupedTiles || dumpMode) && (
+          <button
+            className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
+            onClick={handleDumpModeToggle}
+            disabled={bagTiles.length < 3}
+          >
+            {dumpMode ? 'Cancel Dump' : 'DUMP'}
+          </button>
+        )}
+        {tiles.length > 0 &&
+          bagTiles.length > 0 &&
+          tiles.every((t) => groups.has(t.id)) &&
+          new Set(groups.values()).size === 1 && (
+            <button className="btn" onClick={() => drawTiles(1)}>
+              PEEL
+            </button>
+          )}
+        <label className="dictionary-toggle">
+          <input
+            type="checkbox"
+            checked={useDictionary}
+            onChange={(event) => setUseDictionary(event.target.checked)}
+          />
+          <span>Use Dictionary</span>
+        </label>
 
         <div className="bag-info">
           Tiles in bag: {bagTiles.length}
         </div>
-        {/* <div>
-          {words.map((word, idx) => (
-            <div key={idx} className="word-info">
-              {word.text} ({word.direction})
-            </div>
-          ))}
-        </div> */}
       </div>
 
       <div className="hero-copy">
         <h1 className="game-title">BANANAGRAMS</h1>
         <div className="instructions">
-          Draw tiles from the bag • Drag tiles to build your crossword
+          Drag tiles to build your crossword • Long press to ungroup tiles
         </div>
       </div>
 
-      <div className="play-area">
-        {tiles.map(tile => (
-          <Tile
-            key={tile.id}
-            tileId={tile.id}
-            letter={tile.letter}
-            position={tile.position}
-            groupId={groups.get(tile.id)}
-            borderSides={groupedBorderSides.get(tile.id)}
-            onPositionChange={updateTilePosition}
-            onUngroup={handleUngroupTile}
-            onRegisterElement={registerTileElement}
-          />
-        ))}
+      <div
+        ref={playAreaRef}
+        className={`play-area ${isPanningCamera ? 'camera-panning' : ''}`}
+        onWheel={handlePlayAreaWheel}
+        onPointerDown={handlePlayAreaPointerDown}
+        onPointerMove={handlePlayAreaPointerMove}
+        onPointerUp={handlePlayAreaPointerUp}
+        onPointerCancel={handlePlayAreaPointerUp}
+      >
+        <div className="board" style={boardTransformStyle}>
+          {tiles.map(tile => (
+            <Tile
+              key={tile.id}
+              tileId={tile.id}
+              letter={tile.letter}
+              position={tile.position}
+              groupId={groups.get(tile.id)}
+              borderSides={groupedBorderSides.get(tile.id)}
+              dictionaryState={tileDictionaryState.get(tile.id)}
+              onPositionChange={updateTilePosition}
+              onUngroup={handleUngroupTile}
+              onRegisterElement={registerTileElement}
+              screenToBoard={screenToBoard}
+              dumpMode={dumpMode}
+              onDumpSelect={handleDumpTileSelect}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

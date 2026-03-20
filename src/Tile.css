@@ -37,6 +37,14 @@
   border: 2px solid transparent;
 }
 
+.tile-face.dictionary-invalid {
+  background: linear-gradient(145deg, #e4cdc7 0%, #ddb1a8 100%) !important;
+}
+
+.tile-face.dictionary-valid {
+  background: linear-gradient(145deg, #dbe4cd 0%, #c8d8ac 100%) !important;
+}
+
 .tile.grouped .tile-face.group-border-top {
   border-top-color: #5B9BD5;
 }

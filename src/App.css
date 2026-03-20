@@ -36,6 +36,65 @@
   flex-wrap: wrap;
 }
 
+.dictionary-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(214, 230, 215, 0.2);
+  border-radius: 10px;
+  color: rgba(232, 241, 229, 0.88);
+  background: rgba(7, 18, 13, 0.6);
+  backdrop-filter: blur(10px);
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.82rem;
+  user-select: none;
+  cursor: pointer;
+}
+
+.dictionary-toggle input {
+  margin: 0;
+  width: 2rem;
+  height: 1.1rem;
+  appearance: none;
+  border-radius: 999px;
+  border: 1px solid rgba(214, 230, 215, 0.35);
+  background: rgba(6, 16, 12, 0.75);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.dictionary-toggle input::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: rgba(232, 241, 229, 0.92);
+  transition: transform 0.16s ease;
+}
+
+.dictionary-toggle input:checked {
+  background: rgba(52, 118, 80, 0.78);
+  border-color: rgba(178, 214, 184, 0.7);
+}
+
+.dictionary-toggle input:checked::after {
+  transform: translateX(0.9rem);
+}
+
+.dictionary-toggle input:focus-visible {
+  outline: 2px solid rgba(196, 226, 202, 0.55);
+  outline-offset: 2px;
+}
+
 .btn {
   border: 1px solid rgba(214, 230, 215, 0.22);
   padding: 0.75rem 1rem;
@@ -54,6 +113,14 @@
   background: rgba(16, 38, 27, 0.88);
 }
 
+.btn:focus {
+  outline: none;
+}
+
+.btn.dump-mode-active {
+  outline: 2px solid rgba(255, 255, 255, 0.95);
+}
+
 .hero-copy {
   position: absolute;
   top: 50%;
@@ -69,26 +136,31 @@
 
 .game-title {
   margin: 0;
-  font-size: clamp(2rem, 8vw, 5rem);
+  font-size: clamp(1.55rem, 8vw, 5rem);
   width: 100%;
+  max-width: 100%;
   text-align: center;
-  line-height: 0.95;
-  letter-spacing: 0.18em;
+  line-height: 1;
+  letter-spacing: clamp(0.06em, 1.8vw, 0.18em);
   color: rgba(236, 244, 232, 0.36);
   text-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .instructions {
   margin-top: 1rem;
   font-size: clamp(0.62rem, 1.35vw, 1rem);
-  letter-spacing: 0.12em;
+  letter-spacing: clamp(0.04em, 0.9vw, 0.12em);
   text-transform: uppercase;
   color: rgba(224, 236, 221, 0.28);
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
+  text-wrap: balance;
+  line-height: 1.35;
 }
 
 .bag-info {
-  margin-left: auto;
   padding: 0.75rem 0.95rem;
   border: 1px solid rgba(214, 230, 215, 0.16);
   border-radius: 10px;
@@ -106,6 +178,21 @@
   position: absolute;
   inset: 0;
   z-index: 10;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.play-area.camera-panning {
+  cursor: grabbing;
+}
+
+.board {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 @media (max-width: 768px) {
@@ -114,6 +201,12 @@
     left: 14px;
     right: 14px;
     gap: 10px;
+  }
+
+  .dictionary-toggle {
+    margin-left: 0;
+    font-size: 0.66rem;
+    padding: 0.58rem 0.75rem;
   }
 
   .btn {
@@ -130,7 +223,14 @@
     transform: translate(-50%, -52%);
   }
 
+  .game-title {
+    font-size: clamp(1.1rem, 9vw, 2.2rem);
+    letter-spacing: clamp(0.01em, 0.7vw, 0.05em);
+  }
+
   .instructions {
-    font-size: clamp(0.58rem, 2vw, 0.72rem);
+    font-size: clamp(0.54rem, 2.4vw, 0.72rem);
+    letter-spacing: clamp(0.02em, 0.7vw, 0.06em);
   }
 }
+

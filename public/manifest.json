@@ -1,0 +1,16 @@
+{
+  "name": "Bananagrams",
+  "short_name": "Bananagrams",
+  "orientation": "portrait",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#0a1a13",
+  "theme_color": "#0a1a13",
+  "icons": [
+    {
+      "src": "/image.png",
+      "sizes": "any",
+      "type": "image/png"
+    }
+  ]
+}
