@@ -246,6 +246,15 @@
   display: contents;
 }
 
+/* Exit button: always visible on desktop, hidden on mobile (lives in burger menu instead) */
+.btn-exit-desktop {
+  display: inline-flex;
+}
+
+.btn-exit-burger {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .controls {
     top: 14px;
@@ -281,6 +290,15 @@
 
   .burger-menu.open {
     display: flex;
+  }
+
+  /* Hide desktop-only exit button; show burger-menu version instead */
+  .btn-exit-desktop {
+    display: none;
+  }
+
+  .btn-exit-burger {
+    display: block;
   }
 
   /* Full-width items inside the dropdown */

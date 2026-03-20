@@ -1,0 +1,96 @@
+.menu-screen {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Background layer — same gradient as .game-container, blurred */
+.menu-bg {
+  position: absolute;
+  inset: -16px; /* oversized so blur doesn't leave white edges */
+  background:
+    radial-gradient(circle at top, rgba(72, 104, 81, 0.22), transparent 38%),
+    radial-gradient(circle at bottom left, rgba(31, 58, 43, 0.36), transparent 32%),
+    linear-gradient(180deg, #173526 0%, #10281d 45%, #0a1a13 100%);
+  filter: blur(6px);
+}
+
+/* Grain overlay on top of the blurred bg */
+.menu-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 40%),
+    repeating-linear-gradient(115deg,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 2px,
+      transparent 2px,
+      transparent 14px);
+  opacity: 0.55;
+}
+
+.menu-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 2rem;
+}
+
+.menu-title {
+  margin: 0 0 2.5rem;
+  font-size: clamp(2rem, 10vw, 5rem);
+  line-height: 1;
+  letter-spacing: clamp(0.1em, 2vw, 0.22em);
+  color: rgba(236, 244, 232, 0.9);
+  text-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.menu-action-btn {
+  width: min(320px, 80vw);
+  padding: 1rem 2rem;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(234, 243, 234, 0.9);
+  background: rgba(10, 24, 17, 0.78);
+  border: 1px solid rgba(214, 230, 215, 0.22);
+  border-radius: 10px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.menu-action-btn:hover {
+  border-color: rgba(208, 225, 208, 0.42);
+  background: rgba(16, 38, 27, 0.88);
+}
+
+.menu-action-btn:focus {
+  outline: none;
+}
+
+.menu-action-btn:focus-visible {
+  outline: 2px solid rgba(196, 226, 202, 0.55);
+  outline-offset: 2px;
+}
