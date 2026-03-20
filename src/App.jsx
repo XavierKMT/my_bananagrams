@@ -10,6 +10,7 @@ function App() {
   const [bagTiles, setBagTiles] = useState([]);
   const [useDictionary, setUseDictionary] = useState(false);
   const [dumpMode, setDumpMode] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
   const [isPanningCamera, setIsPanningCamera] = useState(false);
   const [groups, setGroups] = useState(new Map()); // Map of tileId -> groupId
@@ -77,7 +78,7 @@ function App() {
   }, [camera]);
 
   const getTileSize = useCallback(() => (window.innerWidth <= 768 ? 50 : 60), []);
-  const clampScale = useCallback((value) => Math.min(2.5, Math.max(0.5, value)), []);
+  const clampScale = useCallback((value) => Math.min(1.5, Math.max(0.5, value)), []);
   const getBoardSize = useCallback(() => getTileSize() * BOARD_TILE_LIMIT, [getTileSize]);
 
   const getPlayAreaRect = useCallback(() => {
@@ -289,7 +290,7 @@ function App() {
   const isAdjacent = useCallback((pos1, pos2, tileSize = 60) => {
     // Keep group detection aligned with the snap model: tileSize + 1px gap.
     const expectedDistance = tileSize + 1;
-    const alignTolerance = 20;
+    const alignTolerance = 4;
     const distanceTolerance = 4;
 
     const dx = Math.abs(pos1.x - pos2.x);
@@ -297,10 +298,12 @@ function App() {
 
     const horizontalNeighbor =
       dy <= alignTolerance &&
+      dx >= tileSize &&
       Math.abs(dx - expectedDistance) <= distanceTolerance;
 
     const verticalNeighbor =
       dx <= alignTolerance &&
+      dy >= tileSize &&
       Math.abs(dy - expectedDistance) <= distanceTolerance;
 
     return horizontalNeighbor || verticalNeighbor;
@@ -1055,7 +1058,7 @@ function App() {
     const contentHeight = Math.max(1, maxY - minY);
     const fitScaleX = (viewportW - (padding * 2)) / contentWidth;
     const fitScaleY = (viewportH - (padding * 2)) / contentHeight;
-    const fitScale = clampScale(Math.min(fitScaleX, fitScaleY));
+    const fitScale = Math.min(clampScale(Math.min(fitScaleX, fitScaleY)), 1);
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
 
@@ -1090,43 +1093,58 @@ function App() {
   return (
     <div className="game-container">
       <div className="controls">
-        <button className="btn" onClick={initializeGame}>
-          CLEAR
+        <button
+          className={`burger-btn${menuOpen ? ' open' : ''}`}
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-label="Toggle menu"
+          aria-expanded={menuOpen}
+        >
+          <span />
+          <span />
+          <span />
         </button>
-        <button className="btn" onClick={resetView}>
-          Fit to Tiles
-        </button>
-        <button className="btn" onClick={() => drawTiles(21)}>
-          Draw 21 Tiles
-        </button>
-        {(hasUngroupedTiles || dumpMode) && (
-          <button
-            className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
-            onClick={handleDumpModeToggle}
-            disabled={bagTiles.length < 3}
-          >
-            {dumpMode ? 'Cancel Dump' : 'DUMP'}
+
+        <div className={`burger-menu${menuOpen ? ' open' : ''}`}>
+          <button className="btn" onClick={() => { initializeGame(); setMenuOpen(false); }}>
+            CLEAR
           </button>
-        )}
-        {tiles.length > 0 &&
-          bagTiles.length > 0 &&
-          tiles.every((t) => groups.has(t.id)) &&
-          new Set(groups.values()).size === 1 && (
-            <button className="btn" onClick={() => drawTiles(1)}>
-              PEEL
+          <button className="btn" onClick={() => { resetView(); setMenuOpen(false); }}>
+            Fit to Tiles
+          </button>
+          <button className="btn" onClick={() => { drawTiles(21); setMenuOpen(false); }}>
+            Draw 21 Tiles
+          </button>
+          <label className="dictionary-toggle">
+            <input
+              type="checkbox"
+              checked={useDictionary}
+              onChange={(event) => setUseDictionary(event.target.checked)}
+            />
+            <span>Use Dictionary</span>
+          </label>
+          <div className="bag-info">
+            Tiles in bag: {bagTiles.length}
+          </div>
+        </div>
+
+        <div className="controls-actions">
+          {(hasUngroupedTiles || dumpMode) && (
+            <button
+              className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
+              onClick={handleDumpModeToggle}
+              disabled={bagTiles.length < 3}
+            >
+              {dumpMode ? 'Cancel Dump' : 'DUMP'}
             </button>
           )}
-        <label className="dictionary-toggle">
-          <input
-            type="checkbox"
-            checked={useDictionary}
-            onChange={(event) => setUseDictionary(event.target.checked)}
-          />
-          <span>Use Dictionary</span>
-        </label>
-
-        <div className="bag-info">
-          Tiles in bag: {bagTiles.length}
+          {tiles.length > 0 &&
+            bagTiles.length > 0 &&
+            tiles.every((t) => groups.has(t.id)) &&
+            new Set(groups.values()).size === 1 && (
+              <button className="btn" onClick={() => drawTiles(1)}>
+                PEEL
+              </button>
+            )}
         </div>
       </div>
 
