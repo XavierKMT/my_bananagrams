@@ -182,15 +182,23 @@ function App() {
     if (!tileToDump) return;
 
     const remainingTiles = tiles.filter((tile) => tile.id !== tileId);
-    const nextBag = [...bagTiles, tileToDump];
+    const shuffledBag = [...bagTiles];
 
-    for (let i = nextBag.length - 1; i > 0; i--) {
+    for (let i = shuffledBag.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [nextBag[i], nextBag[j]] = [nextBag[j], nextBag[i]];
+      [shuffledBag[i], shuffledBag[j]] = [shuffledBag[j], shuffledBag[i]];
     }
 
-    const drawn = nextBag.slice(0, 3);
-    const remainingBag = nextBag.slice(3);
+    const drawn = shuffledBag.slice(0, 3);
+    const remainingBag = shuffledBag.slice(3);
+
+    remainingBag.push(tileToDump);
+
+    for (let i = remainingBag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [remainingBag[i], remainingBag[j]] = [remainingBag[j], remainingBag[i]];
+    }
+
     const replacementTiles = placeTilesInVisibleRegion(drawn, remainingTiles);
     const updatedTiles = [...remainingTiles, ...replacementTiles];
 

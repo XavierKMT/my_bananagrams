@@ -1,4 +1,4 @@
-export const BOARD_TILE_LIMIT = 100;
+export const BOARD_TILE_LIMIT = 65;
 
 export const TILE_DISTRIBUTION = {
   A: 13, B: 3, C: 3, D: 6, E: 18, F: 3,
