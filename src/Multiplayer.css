@@ -1,0 +1,136 @@
+.multiplayer-card {
+  width: min(460px, 92vw);
+}
+
+.multiplayer-title {
+  white-space: nowrap;
+  font-size: clamp(1.35rem, 6.4vw, 3rem);
+  letter-spacing: clamp(0.06em, 1.2vw, 0.14em);
+}
+
+.multiplayer-label {
+  width: min(320px, 80vw);
+  text-align: left;
+  margin-bottom: 0.35rem;
+  color: rgba(232, 241, 229, 0.85);
+  letter-spacing: 0.06em;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.multiplayer-input {
+  width: min(320px, 80vw);
+  margin-bottom: 1rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(214, 230, 215, 0.28);
+  border-radius: 10px;
+  background: rgba(7, 18, 13, 0.72);
+  color: rgba(232, 241, 229, 0.92);
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.multiplayer-input:focus {
+  outline: none;
+}
+
+.multiplayer-input:focus-visible {
+  outline: 2px solid rgba(196, 226, 202, 0.55);
+  outline-offset: 2px;
+}
+
+.multiplayer-error {
+  width: min(320px, 80vw);
+  margin-bottom: 1rem;
+  color: rgba(255, 202, 202, 0.95);
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.room-code {
+  margin-bottom: 0.35rem;
+  color: rgba(236, 244, 232, 0.95);
+  font-size: 1.5rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.lobby-note {
+  margin-bottom: 0.9rem;
+  color: rgba(222, 235, 222, 0.75);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-slots {
+  width: min(360px, 84vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.player-slot {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(214, 230, 215, 0.2);
+  border-radius: 10px;
+  background: rgba(8, 19, 14, 0.65);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.player-slot-label {
+  color: rgba(222, 235, 222, 0.7);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.player-slot-name {
+  color: rgba(236, 244, 232, 0.9);
+  font-weight: 600;
+  font-size: 0.86rem;
+  text-align: right;
+}
+
+.player-slot-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+}
+
+.player-ready-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.14rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.player-ready-badge.ready {
+  color: rgba(196, 236, 201, 0.95);
+  background: rgba(46, 103, 66, 0.5);
+  border-color: rgba(119, 190, 138, 0.45);
+}
+
+.player-ready-badge.not-ready {
+  color: rgba(241, 210, 210, 0.95);
+  background: rgba(99, 44, 44, 0.42);
+  border-color: rgba(194, 116, 116, 0.4);
+}
+
+.menu-action-btn.secondary {
+  background: rgba(8, 18, 13, 0.62);
+}
+
+.menu-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

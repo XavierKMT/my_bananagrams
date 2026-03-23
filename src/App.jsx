@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Tile from './Tile';
 import Menu from './Menu';
+import MultiplayerSetup from './MultiplayerSetup';
+import Lobby from './Lobby';
+import NotificationBanner from './NotificationBanner';
 import './App.css';
 import { BOARD_TILE_LIMIT, TILE_DISTRIBUTION } from './constants';
 import { useCamera } from './hooks/useCamera';
 import { useGroups } from './hooks/useGroups';
 import { useWordDetection } from './hooks/useWordDetection';
+import { useMultiplayer } from './hooks/useMultiplayer';
 
 function App() {
   const [tiles, setTiles] = useState([]);
@@ -14,6 +18,11 @@ function App() {
   const [useDictionary, setUseDictionary] = useState(false);
   const [dumpMode, setDumpMode] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notification, setNotification] = useState({
+    message: '',
+    visible: false,
+    id: 0,
+  });
 
   const tileElementsRef = useRef(new Map());
   const playAreaRef = useRef(null);
@@ -81,6 +90,65 @@ function App() {
     setDumpMode(false);
     centerCameraOnBoard();
   }, [centerCameraOnBoard, resetGroupingState]);
+
+  const handleEnterLobby = useCallback(() => {
+    setScreen('lobby');
+  }, []);
+
+  const handleMultiplayerGameStart = useCallback(() => {
+    initializeGame();
+    setScreen('game');
+  }, [initializeGame]);
+
+  const handleMultiplayerReturnToMenu = useCallback(() => {
+    setScreen('menu');
+  }, []);
+
+  const showNotification = useCallback((message) => {
+    if (!message) return;
+    setNotification({
+      message,
+      visible: true,
+      id: Date.now(),
+    });
+  }, []);
+
+  const {
+    multiplayerUsername,
+    setMultiplayerUsername,
+    multiplayerError,
+    setMultiplayerError,
+    roomCodeInput,
+    setRoomCodeInput,
+    roomCode,
+    lobbyPlayers,
+    isLobbyHost,
+    currentPeerId,
+    allPlayersReady,
+    currentPlayerReady,
+    createRoom,
+    joinRoom,
+    toggleReady,
+    startGame,
+    leaveLobby,
+  } = useMultiplayer({
+    onEnterLobby: handleEnterLobby,
+    onGameStart: handleMultiplayerGameStart,
+    onReturnToMenu: handleMultiplayerReturnToMenu,
+    onNotify: showNotification,
+  });
+
+  useEffect(() => {
+    if (!notification.visible) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setNotification((prev) => ({ ...prev, visible: false }));
+    }, 3200);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [notification.id, notification.visible]);
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -529,17 +597,100 @@ function App() {
 
   if (screen === 'menu') {
     return (
-      <Menu
-        onStart={() => {
-          initializeGame();
-          setScreen('game');
-        }}
-      />
+      <>
+        <NotificationBanner message={notification.message} visible={notification.visible} />
+        <Menu
+          onStartSinglePlayer={() => {
+            initializeGame();
+            setScreen('game');
+          }}
+          onStartCreateRoom={() => {
+            setMultiplayerError('');
+            setRoomCodeInput('');
+            setScreen('createRoomSetup');
+          }}
+          onStartJoinRoom={() => {
+            setMultiplayerError('');
+            setRoomCodeInput('');
+            setScreen('joinRoomSetup');
+          }}
+        />
+      </>
+    );
+  }
+
+  if (screen === 'createRoomSetup') {
+    return (
+      <>
+        <NotificationBanner message={notification.message} visible={notification.visible} />
+        <MultiplayerSetup
+          mode="create"
+          username={multiplayerUsername}
+          roomCode={roomCodeInput}
+          onUsernameChange={setMultiplayerUsername}
+          onRoomCodeChange={setRoomCodeInput}
+          onCreateRoom={createRoom}
+          onJoinRoom={joinRoom}
+          onBack={() => {
+            setMultiplayerError('');
+            setRoomCodeInput('');
+            setScreen('menu');
+          }}
+          error={multiplayerError}
+        />
+      </>
+    );
+  }
+
+  if (screen === 'joinRoomSetup') {
+    return (
+      <>
+        <NotificationBanner message={notification.message} visible={notification.visible} />
+        <MultiplayerSetup
+          mode="join"
+          username={multiplayerUsername}
+          roomCode={roomCodeInput}
+          onUsernameChange={setMultiplayerUsername}
+          onRoomCodeChange={setRoomCodeInput}
+          onCreateRoom={createRoom}
+          onJoinRoom={joinRoom}
+          onBack={() => {
+            setMultiplayerError('');
+            setRoomCodeInput('');
+            setScreen('menu');
+          }}
+          error={multiplayerError}
+        />
+      </>
+    );
+  }
+
+  if (screen === 'lobby') {
+    return (
+      <>
+        <NotificationBanner message={notification.message} visible={notification.visible} />
+        <Lobby
+          roomCode={roomCode}
+          players={lobbyPlayers}
+          isHost={isLobbyHost}
+          currentPeerId={currentPeerId}
+          currentPlayerReady={currentPlayerReady}
+          startEnabled={isLobbyHost && allPlayersReady}
+          onToggleReady={toggleReady}
+          onStartGame={startGame}
+          onBack={() => {
+            leaveLobby();
+            setScreen('menu');
+          }}
+        />
+      </>
     );
   }
 
   return (
-    <div className="game-container">
+    <>
+      <NotificationBanner message={notification.message} visible={notification.visible} />
+      <div className="game-container">
       <div className="controls">
         <button
           className={`burger-btn${menuOpen ? ' open' : ''}`}
@@ -553,7 +704,7 @@ function App() {
         </button>
 
         <div className={`burger-menu${menuOpen ? ' open' : ''}`}>
-          <button className="btn" onClick={() => { setScreen('menu'); setMenuOpen(false); }}>
+          <button className="btn" onClick={() => { leaveLobby(); setScreen('menu'); setMenuOpen(false); }}>
             Exit
           </button>
           <button className="btn" onClick={() => { initializeGame(); setMenuOpen(false); }}>
@@ -635,7 +786,8 @@ function App() {
           ))}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
