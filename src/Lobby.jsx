@@ -34,7 +34,7 @@ export default function Lobby({
                     {`${player.username}${player.isHost ? ' (Host)' : ''}${player.id === currentPeerId ? ' (You)' : ''}`}
                   </span>
                   <span className={`player-ready-badge ${player.isReady ? 'ready' : 'not-ready'}`}>
-                    {player.isReady ? 'Ready' : 'Not Ready'}
+                    {player.status || (player.isReady ? 'Ready' : 'Not Ready')}
                   </span>
                 </div>
               ) : (
@@ -70,6 +70,7 @@ Lobby.propTypes = {
       username: PropTypes.string.isRequired,
       isHost: PropTypes.bool,
       isReady: PropTypes.bool,
+      status: PropTypes.string,
     }),
   ).isRequired,
   isHost: PropTypes.bool.isRequired,

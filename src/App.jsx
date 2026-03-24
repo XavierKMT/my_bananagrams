@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Users, Crown } from 'lucide-react';
 import Tile from './Tile';
 import Menu from './Menu';
 import MultiplayerSetup from './MultiplayerSetup';
@@ -15,9 +16,14 @@ function App() {
   const [tiles, setTiles] = useState([]);
   const [bagTiles, setBagTiles] = useState([]);
   const [screen, setScreen] = useState('menu');
+  const [gameMode, setGameMode] = useState(null);
   const [useDictionary, setUseDictionary] = useState(false);
   const [dumpMode, setDumpMode] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [multiplayerTabOpen, setMultiplayerTabOpen] = useState(false);
+  const [spectatedPlayerIndex, setSpectatedPlayerIndex] = useState(0);
+  const [multiplayerCountdown, setMultiplayerCountdown] = useState(null);
+  const [multiplayerWinner, setMultiplayerWinner] = useState(null);
   const [notification, setNotification] = useState({
     message: '',
     visible: false,
@@ -69,6 +75,11 @@ function App() {
     getTileSize,
   });
 
+  const createSharedBagPlaceholders = useCallback((count) => {
+    const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+    return Array.from({ length: safeCount }, (_, index) => ({ id: `shared-bag-${index}`, letter: '' }));
+  }, []);
+
   const initializeGame = useCallback(() => {
     const allTiles = [];
     let id = 0;
@@ -92,67 +103,32 @@ function App() {
   }, [centerCameraOnBoard, resetGroupingState]);
 
   const handleEnterLobby = useCallback(() => {
+    setGameMode('multiplayer');
     setScreen('lobby');
   }, []);
 
-  const handleMultiplayerGameStart = useCallback(() => {
+  const handleStartSinglePlayer = useCallback(() => {
+    setGameMode('singlePlayer');
     initializeGame();
     setScreen('game');
   }, [initializeGame]);
 
   const handleMultiplayerReturnToMenu = useCallback(() => {
+    setMultiplayerCountdown(null);
+    setMultiplayerWinner(null);
+    setGameMode(null);
+    setMultiplayerTabOpen(false);
     setScreen('menu');
   }, []);
 
-  const showNotification = useCallback((message) => {
-    if (!message) return;
-    setNotification({
-      message,
-      visible: true,
-      id: Date.now(),
-    });
+  const handleCountdownStart = useCallback((seconds) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      setMultiplayerCountdown(null);
+      return;
+    }
+
+    setMultiplayerCountdown(Math.ceil(seconds));
   }, []);
-
-  const {
-    multiplayerUsername,
-    setMultiplayerUsername,
-    multiplayerError,
-    setMultiplayerError,
-    roomCodeInput,
-    setRoomCodeInput,
-    roomCode,
-    lobbyPlayers,
-    isLobbyHost,
-    currentPeerId,
-    allPlayersReady,
-    currentPlayerReady,
-    createRoom,
-    joinRoom,
-    toggleReady,
-    startGame,
-    leaveLobby,
-  } = useMultiplayer({
-    onEnterLobby: handleEnterLobby,
-    onGameStart: handleMultiplayerGameStart,
-    onReturnToMenu: handleMultiplayerReturnToMenu,
-    onNotify: showNotification,
-  });
-
-  useEffect(() => {
-    if (!notification.visible) return undefined;
-
-    const timeout = window.setTimeout(() => {
-      setNotification((prev) => ({ ...prev, visible: false }));
-    }, 3200);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [notification.id, notification.visible]);
-
-  useEffect(() => {
-    tilesRef.current = tiles;
-  }, [tiles]);
 
   const placeTilesInVisibleRegion = useCallback((drawnTiles, existingTiles) => {
     const tileSize = getTileSize();
@@ -216,8 +192,225 @@ function App() {
     return placedTiles;
   }, [cameraRef, getBoardSize, getPlayAreaRect, getTileSize]);
 
-  const drawTiles = useCallback((count) => {
+  const handleMultiplayerDraw = useCallback((drawnTiles, remainingBagCount) => {
+    const tilesToPlace = Array.isArray(drawnTiles) ? drawnTiles : [];
+
+    if (tilesToPlace.length > 0) {
+      setTiles((previousTiles) => [
+        ...previousTiles,
+        ...placeTilesInVisibleRegion(tilesToPlace, previousTiles),
+      ]);
+    }
+
+    if (Number.isFinite(remainingBagCount)) {
+      setBagTiles(createSharedBagPlaceholders(remainingBagCount));
+    }
+  }, [createSharedBagPlaceholders, placeTilesInVisibleRegion]);
+
+  const handleMultiplayerDump = useCallback(({ removedTileId, drawnTiles, remainingBagCount }) => {
+    if (!Number.isFinite(removedTileId)) {
+      return;
+    }
+
+    const currentTiles = tilesRef.current;
+    const remainingTiles = currentTiles.filter((tile) => tile.id !== removedTileId);
+    const replacementTiles = Array.isArray(drawnTiles) && drawnTiles.length > 0
+      ? placeTilesInVisibleRegion(drawnTiles, remainingTiles)
+      : [];
+    const updatedTiles = [...remainingTiles, ...replacementTiles];
+
+    const nextDetachedIds = new Set(detachedTileIdsRef.current);
+    nextDetachedIds.delete(removedTileId);
+
+    setTiles(updatedTiles);
+    setDetachedTileIds(nextDetachedIds);
+    detachedTileIdsRef.current = nextDetachedIds;
+    setDumpMode(false);
+    formGroups(updatedTiles, nextDetachedIds);
+
+    if (Number.isFinite(remainingBagCount)) {
+      setBagTiles(createSharedBagPlaceholders(remainingBagCount));
+    }
+  }, [createSharedBagPlaceholders, detachedTileIdsRef, formGroups, placeTilesInVisibleRegion, setDetachedTileIds]);
+
+  const handleBagCountUpdate = useCallback((remainingBagCount) => {
+    if (!Number.isFinite(remainingBagCount)) return;
+    setBagTiles(createSharedBagPlaceholders(remainingBagCount));
+  }, [createSharedBagPlaceholders]);
+
+  const handleMultiplayerGameStartWithData = useCallback((gameStartData) => {
+    const initialTiles = Array.isArray(gameStartData?.initialTiles) ? gameStartData.initialTiles : [];
+    const remainingBagCount = Number(gameStartData?.remainingBagCount);
+
+    setMultiplayerCountdown(null);
+    setGameMode('multiplayer');
+    resetGroupingState();
+    setDumpMode(false);
+    centerCameraOnBoard();
+
+    const placedInitialTiles = initialTiles.length > 0
+      ? placeTilesInVisibleRegion(initialTiles, [])
+      : [];
+
+    setTiles(placedInitialTiles);
+    setBagTiles(
+      createSharedBagPlaceholders(Number.isFinite(remainingBagCount) ? remainingBagCount : 0),
+    );
+    setScreen('game');
+  }, [centerCameraOnBoard, createSharedBagPlaceholders, placeTilesInVisibleRegion, resetGroupingState]);
+
+  const showNotification = useCallback((message) => {
+    if (!message) return;
+    setNotification({
+      message,
+      visible: true,
+      id: Date.now(),
+    });
+  }, []);
+
+  const handleWin = useCallback((message) => {
+    if (!message) return;
+    setMultiplayerWinner(message);
+  }, []);
+
+  const {
+    multiplayerUsername,
+    setMultiplayerUsername,
+    multiplayerError,
+    setMultiplayerError,
+    roomCodeInput,
+    setRoomCodeInput,
+    roomCode,
+    lobbyPlayers,
+    isLobbyHost,
+    currentPeerId,
+    allPlayersReady,
+    currentPlayerReady,
+    createRoom,
+    joinRoom,
+    toggleReady,
+    startGame,
+    requestMultiplayerDraw,
+    requestMultiplayerDump,
+    leaveLobby,
+  } = useMultiplayer({
+    onEnterLobby: handleEnterLobby,
+    onGameStart: handleMultiplayerGameStartWithData,
+    onReturnToMenu: handleMultiplayerReturnToMenu,
+    onNotify: showNotification,
+    onWin: handleWin,
+    onCountdownStart: handleCountdownStart,
+    onMultiplayerDraw: handleMultiplayerDraw,
+    onMultiplayerDump: handleMultiplayerDump,
+    onBagCountUpdate: handleBagCountUpdate,
+  });
+
+  const handleReturnToMenu = useCallback(() => {
+    if (gameMode === 'multiplayer') {
+      leaveLobby();
+    }
+
+    setGameMode(null);
+    setMultiplayerCountdown(null);
+    setMultiplayerWinner(null);
+    setMultiplayerTabOpen(false);
+    setScreen('menu');
+    setMenuOpen(false);
+  }, [gameMode, leaveLobby]);
+
+  useEffect(() => {
+    if (multiplayerCountdown === null) return undefined;
+    if (multiplayerCountdown <= 0) {
+      setMultiplayerCountdown(null);
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setMultiplayerCountdown((previous) => {
+        if (previous === null) return null;
+        return previous - 1;
+      });
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [multiplayerCountdown]);
+
+  useEffect(() => {
+    if (!notification.visible) return undefined;
+
+    const timeout = window.setTimeout(() => {
+      setNotification((prev) => ({ ...prev, visible: false }));
+    }, 3200);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [notification.id, notification.visible]);
+
+  useEffect(() => {
+    tilesRef.current = tiles;
+  }, [tiles]);
+
+  useEffect(() => {
+    if (gameMode !== 'multiplayer') {
+      setMultiplayerTabOpen(false);
+    }
+  }, [gameMode]);
+
+  const currentLobbyPlayer = lobbyPlayers.find((player) => player.id === currentPeerId) || null;
+  const spectatablePlayers = lobbyPlayers.filter(
+    (player) => player.id !== currentPeerId && player.status === 'In game',
+  );
+  const activeSpectatedPlayer = spectatablePlayers.length > 0
+    ? spectatablePlayers[Math.min(spectatedPlayerIndex, spectatablePlayers.length - 1)]
+    : null;
+
+  useEffect(() => {
+    if (spectatablePlayers.length === 0) {
+      if (spectatedPlayerIndex !== 0) {
+        setSpectatedPlayerIndex(0);
+      }
+      return;
+    }
+
+    if (spectatedPlayerIndex > spectatablePlayers.length - 1) {
+      setSpectatedPlayerIndex(0);
+    }
+  }, [spectatedPlayerIndex, spectatablePlayers.length]);
+
+  const handlePreviousSpectatedPlayer = useCallback(() => {
+    if (spectatablePlayers.length === 0) return;
+
+    setSpectatedPlayerIndex((previousIndex) => (
+      previousIndex === 0 ? spectatablePlayers.length - 1 : previousIndex - 1
+    ));
+  }, [spectatablePlayers.length]);
+
+  const handleNextSpectatedPlayer = useCallback(() => {
+    if (spectatablePlayers.length === 0) return;
+
+    setSpectatedPlayerIndex((previousIndex) => (
+      previousIndex === spectatablePlayers.length - 1 ? 0 : previousIndex + 1
+    ));
+  }, [spectatablePlayers.length]);
+
+  const getPlayerStatusClassName = useCallback((player) => {
+    if (player?.status === 'In game') {
+      return 'in-game';
+    }
+
+    return player?.isReady ? 'ready' : 'not-ready';
+  }, []);
+
+  const drawTiles = useCallback((count, actionType = null) => {
     if (bagTiles.length === 0) return;
+
+    if (gameMode === 'multiplayer') {
+      requestMultiplayerDraw(count, actionType);
+      return;
+    }
 
     const toDraw = Math.min(count, bagTiles.length);
     const drawn = bagTiles.slice(0, toDraw);
@@ -226,7 +419,7 @@ function App() {
 
     setTiles((prev) => [...prev, ...newTiles]);
     setBagTiles(remaining);
-  }, [bagTiles, placeTilesInVisibleRegion, tiles]);
+  }, [bagTiles, gameMode, placeTilesInVisibleRegion, requestMultiplayerDraw, tiles]);
 
   const handleDumpModeToggle = useCallback(() => {
     if (dumpMode) {
@@ -248,6 +441,11 @@ function App() {
 
     const tileToDump = tiles.find((tile) => tile.id === tileId);
     if (!tileToDump) return;
+
+    if (gameMode === 'multiplayer') {
+      requestMultiplayerDump({ id: tileToDump.id, letter: tileToDump.letter });
+      return;
+    }
 
     const remainingTiles = tiles.filter((tile) => tile.id !== tileId);
     const shuffledBag = [...bagTiles];
@@ -279,7 +477,7 @@ function App() {
     detachedTileIdsRef.current = nextDetachedIds;
     setDumpMode(false);
     formGroups(updatedTiles, nextDetachedIds);
-  }, [bagTiles, detachedTileIdsRef, dumpMode, formGroups, groups, placeTilesInVisibleRegion, setDetachedTileIds, tiles]);
+  }, [bagTiles, detachedTileIdsRef, dumpMode, formGroups, gameMode, groups, placeTilesInVisibleRegion, requestMultiplayerDump, setDetachedTileIds, tiles]);
 
   useEffect(() => {
     if (dumpMode && !hasUngroupedTiles) {
@@ -310,8 +508,8 @@ function App() {
     const movedTileIds = groupId === undefined
       ? [tileId]
       : currentTiles
-          .filter((tile) => groupsRef.current.get(tile.id) === groupId)
-          .map((tile) => tile.id);
+        .filter((tile) => groupsRef.current.get(tile.id) === groupId)
+        .map((tile) => tile.id);
     const movedTileIdSet = new Set(movedTileIds);
     const currentPositions = new Map();
 
@@ -600,16 +798,17 @@ function App() {
       <>
         <NotificationBanner message={notification.message} visible={notification.visible} />
         <Menu
-          onStartSinglePlayer={() => {
-            initializeGame();
-            setScreen('game');
-          }}
+          onStartSinglePlayer={handleStartSinglePlayer}
           onStartCreateRoom={() => {
+            setGameMode('multiplayer');
+            setMultiplayerTabOpen(false);
             setMultiplayerError('');
             setRoomCodeInput('');
             setScreen('createRoomSetup');
           }}
           onStartJoinRoom={() => {
+            setGameMode('multiplayer');
+            setMultiplayerTabOpen(false);
             setMultiplayerError('');
             setRoomCodeInput('');
             setScreen('joinRoomSetup');
@@ -634,6 +833,8 @@ function App() {
           onBack={() => {
             setMultiplayerError('');
             setRoomCodeInput('');
+            setGameMode(null);
+            setMultiplayerTabOpen(false);
             setScreen('menu');
           }}
           error={multiplayerError}
@@ -657,6 +858,8 @@ function App() {
           onBack={() => {
             setMultiplayerError('');
             setRoomCodeInput('');
+            setGameMode(null);
+            setMultiplayerTabOpen(false);
             setScreen('menu');
           }}
           error={multiplayerError}
@@ -669,6 +872,12 @@ function App() {
     return (
       <>
         <NotificationBanner message={notification.message} visible={notification.visible} />
+        {multiplayerCountdown !== null && (
+          <div className="multiplayer-countdown-overlay" aria-live="polite">
+            <p className="multiplayer-countdown-label">Game starts in</p>
+            <p className="multiplayer-countdown-number">{multiplayerCountdown}</p>
+          </div>
+        )}
         <Lobby
           roomCode={roomCode}
           players={lobbyPlayers}
@@ -678,10 +887,7 @@ function App() {
           startEnabled={isLobbyHost && allPlayersReady}
           onToggleReady={toggleReady}
           onStartGame={startGame}
-          onBack={() => {
-            leaveLobby();
-            setScreen('menu');
-          }}
+          onBack={handleReturnToMenu}
         />
       </>
     );
@@ -690,102 +896,219 @@ function App() {
   return (
     <>
       <NotificationBanner message={notification.message} visible={notification.visible} />
+      {multiplayerCountdown !== null && (
+        <div className="multiplayer-countdown-overlay" aria-live="polite">
+          <p className="multiplayer-countdown-label">Game starts in</p>
+          <p className="multiplayer-countdown-number">{multiplayerCountdown}</p>
+        </div>
+      )}
       <div className="game-container">
-      <div className="controls">
-        <button
-          className={`burger-btn${menuOpen ? ' open' : ''}`}
-          onClick={() => setMenuOpen((o) => !o)}
-          aria-label="Toggle menu"
-          aria-expanded={menuOpen}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
+        {gameMode === 'multiplayer' && (
+          <>
+            <button
+              className={`multiplayer-tab${multiplayerTabOpen ? ' open' : ''}`}
+              onClick={() => {
+                setSpectatedPlayerIndex(0);
+                setMultiplayerTabOpen(true);
+              }}
+              aria-label="Open multiplayer player list"
+            >
+              <Users className="multiplayer-tab-icon" aria-hidden="true" strokeWidth={2.1} />
+            </button>
 
-        <div className={`burger-menu${menuOpen ? ' open' : ''}`}>
-          <button className="btn" onClick={() => { leaveLobby(); setScreen('menu'); setMenuOpen(false); }}>
-            Exit
+            {multiplayerTabOpen && (
+              <div
+                className={`multiplayer-panel-overlay${activeSpectatedPlayer ? ' has-spectated-player' : ''}`}
+                onClick={() => setMultiplayerTabOpen(false)}
+              >
+                <section
+                  className={`multiplayer-panel${activeSpectatedPlayer ? ' has-spectated-player' : ''}`}
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label="Multiplayer player list"
+                >
+                  <div className="multiplayer-panel-header">
+                    <div className="multiplayer-panel-room-block">
+                      <div className="multiplayer-panel-room-text">
+                        <p className="multiplayer-panel-eyebrow">Room Code</p>
+                        <h2>{roomCode}</h2>
+                      </div>
+                      <button
+                        className="multiplayer-panel-close-icon"
+                        onClick={() => setMultiplayerTabOpen(false)}
+                        aria-label="Close multiplayer panel"
+                      >
+                        x
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="multiplayer-panel-self">
+                    <div className="multiplayer-panel-meta-row">
+                      <div className="multiplayer-panel-name">
+                        {currentLobbyPlayer?.username || multiplayerUsername}
+                        {' (You)'}
+                      </div>
+                      {currentLobbyPlayer?.isHost && <Crown size={20} />}
+                      <span className={`multiplayer-player-status ${getPlayerStatusClassName(currentLobbyPlayer)}`}>
+                        {currentLobbyPlayer?.status || 'Not Ready'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="multiplayer-carousel">
+                    <div className="multiplayer-carousel-header">
+                      <button
+                        className="multiplayer-carousel-nav"
+                        onClick={handlePreviousSpectatedPlayer}
+                        disabled={spectatablePlayers.length <= 1}
+                        aria-label="View previous player"
+                      >
+                        <ChevronLeft aria-hidden="true" />
+                      </button>
+
+                      <div className="multiplayer-carousel-title-wrap">
+                        <p className="multiplayer-panel-eyebrow">Spectating</p>
+                        <h3 className="multiplayer-carousel-title">
+                          {activeSpectatedPlayer ? (
+                            <>
+                              {activeSpectatedPlayer.username}
+                              {activeSpectatedPlayer.isHost && (
+                                <>
+                                  {' '}
+                                  <Crown size={16} aria-label="Host" />
+                                </>
+                              )}
+                            </>
+                          ) : 'No Other Players In Game'}
+                        </h3>
+                      </div>
+
+                      <button
+                        className="multiplayer-carousel-nav"
+                        onClick={handleNextSpectatedPlayer}
+                        disabled={spectatablePlayers.length <= 1}
+                        aria-label="View next player"
+                      >
+                        <ChevronRight aria-hidden="true" />
+                      </button>
+                    </div>
+
+                    <div className="multiplayer-carousel-stage">
+                      {!activeSpectatedPlayer && (
+                        <p className="multiplayer-carousel-empty">
+                          Other players will appear here once they are in game.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="controls">
+          <button
+            className={`burger-btn${menuOpen ? ' open' : ''}`}
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="Toggle menu"
+            aria-expanded={menuOpen}
+          >
+            <span />
+            <span />
+            <span />
           </button>
-          <button className="btn" onClick={() => { initializeGame(); setMenuOpen(false); }}>
-            CLEAR
-          </button>
-          <button className="btn" onClick={() => { resetView(tiles); setMenuOpen(false); }}>
-            Fit to Tiles
-          </button>
-          <button className="btn" onClick={() => { drawTiles(21); setMenuOpen(false); }}>
-            Draw 21 Tiles
-          </button>
-          <label className="dictionary-toggle">
-            <input
-              type="checkbox"
-              checked={useDictionary}
-              onChange={(event) => setUseDictionary(event.target.checked)}
-            />
-            <span>Use Dictionary</span>
-          </label>
+
+          <div className={`burger-menu${menuOpen ? ' open' : ''}`}>
+
+            {gameMode !== 'multiplayer' && (
+              <button className="btn" onClick={() => { drawTiles(21); setMenuOpen(false); }}>
+                Draw 21 Tiles
+              </button>
+            )}
+            <button className="btn" onClick={() => { resetView(tiles); setMenuOpen(false); }}>
+              Fit to Tiles
+            </button>
+            <label className="dictionary-toggle">
+              <input
+                type="checkbox"
+                checked={useDictionary}
+                onChange={(event) => setUseDictionary(event.target.checked)}
+              />
+              <span>Use Dictionary</span>
+            </label>
+            {gameMode !== 'multiplayer' && (
+              <button className="btn" onClick={() => { initializeGame(); setMenuOpen(false); }}>
+                CLEAR
+              </button>
+            )}
+            <button className="btn" onClick={handleReturnToMenu}>
+              Exit
+            </button>
+          </div>
+
           <div className="bag-info">
             Tiles in bag: {bagTiles.length}
           </div>
-        </div>
 
-        <div className="controls-actions">
-          {(hasUngroupedTiles || dumpMode) && (
-            <button
-              className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
-              onClick={handleDumpModeToggle}
-              disabled={bagTiles.length < 3}
-            >
-              {dumpMode ? 'Cancel Dump' : 'DUMP'}
-            </button>
-          )}
-          {tiles.length > 0 &&
-            bagTiles.length > 0 &&
-            tiles.every((t) => groups.has(t.id)) &&
-            new Set(groups.values()).size === 1 && (
-              <button className="btn" onClick={() => drawTiles(1)}>
-                PEEL
+          <div className="controls-actions">
+            {(hasUngroupedTiles || dumpMode) && (
+              <button
+                className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
+                onClick={handleDumpModeToggle}
+                disabled={bagTiles.length < 3 || Boolean(multiplayerWinner)}
+              >
+                {dumpMode ? 'Cancel Dump' : 'DUMP'}
               </button>
             )}
+            {tiles.length > 0 &&
+              bagTiles.length > 0 &&
+              !multiplayerWinner &&
+              tiles.every((t) => groups.has(t.id)) &&
+              new Set(groups.values()).size === 1 && (
+                <button className="btn" onClick={() => drawTiles(1, 'peels')}>
+                  PEEL
+                </button>
+              )}
+          </div>
         </div>
-      </div>
 
-      <div className="hero-copy">
-        <h1 className="game-title">BANANAGRAMS</h1>
-        <div className="instructions">
-          Drag tiles to build your crossword • Long press to ungroup tiles
+        <div className="hero-copy">
+          <h1 className="game-title">BANANAGRAMS</h1>
+          <div className="instructions">
+            Drag tiles to build your crossword • Long press to ungroup tiles
+          </div>
         </div>
-      </div>
 
-      <div
-        ref={playAreaRef}
-        className={`play-area ${isPanningCamera ? 'camera-panning' : ''}`}
-        onWheel={handlePlayAreaWheel}
-        onPointerDown={handlePlayAreaPointerDown}
-        onPointerMove={handlePlayAreaPointerMove}
-        onPointerUp={handlePlayAreaPointerUp}
-        onPointerCancel={handlePlayAreaPointerUp}
-      >
-        <div className="board" style={boardTransformStyle}>
-          {tiles.map((tile) => (
-            <Tile
-              key={tile.id}
-              tileId={tile.id}
-              letter={tile.letter}
-              position={tile.position}
-              groupId={groups.get(tile.id)}
-              borderSides={groupedBorderSides.get(tile.id)}
-              dictionaryState={tileDictionaryState.get(tile.id)}
-              onPositionChange={updateTilePosition}
-              onUngroup={handleUngroupTile}
-              onRegisterElement={registerTileElement}
-              screenToBoard={screenToBoard}
-              dumpMode={dumpMode}
-              onDumpSelect={handleDumpTileSelect}
-            />
-          ))}
+        <div
+          ref={playAreaRef}
+          className={`play-area ${isPanningCamera ? 'camera-panning' : ''}`}
+          onWheel={handlePlayAreaWheel}
+          onPointerDown={handlePlayAreaPointerDown}
+          onPointerMove={handlePlayAreaPointerMove}
+          onPointerUp={handlePlayAreaPointerUp}
+          onPointerCancel={handlePlayAreaPointerUp}
+        >
+          <div className="board" style={boardTransformStyle}>
+            {tiles.map((tile) => (
+              <Tile
+                key={tile.id}
+                tileId={tile.id}
+                letter={tile.letter}
+                position={tile.position}
+                groupId={groups.get(tile.id)}
+                borderSides={groupedBorderSides.get(tile.id)}
+                dictionaryState={tileDictionaryState.get(tile.id)}
+                onPositionChange={updateTilePosition}
+                onUngroup={handleUngroupTile}
+                onRegisterElement={registerTileElement}
+                screenToBoard={screenToBoard}
+                dumpMode={dumpMode}
+                onDumpSelect={handleDumpTileSelect}
+              />
+            ))}
+          </div>
         </div>
-      </div>
       </div>
     </>
   );

@@ -1,7 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Peer from 'peerjs';
+import { TILE_DISTRIBUTION } from '../constants';
 
-export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNotify }) {
+const READY_STATUS = 'Ready';
+const NOT_READY_STATUS = 'Not Ready';
+const IN_GAME_STATUS = 'In game';
+
+export function useMultiplayer({
+  onEnterLobby,
+  onGameStart,
+  onReturnToMenu,
+  onNotify,
+  onWin,
+  onCountdownStart,
+  onMultiplayerDraw,
+  onMultiplayerDump,
+  onBagCountUpdate,
+}) {
   const [multiplayerUsername, setMultiplayerUsername] = useState('');
   const [multiplayerError, setMultiplayerError] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
@@ -18,6 +33,13 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
   const onGameStartRef = useRef(onGameStart);
   const onReturnToMenuRef = useRef(onReturnToMenu);
   const onNotifyRef = useRef(onNotify);
+  const onCountdownStartRef = useRef(onCountdownStart);
+  const onMultiplayerDrawRef = useRef(onMultiplayerDraw);
+  const onMultiplayerDumpRef = useRef(onMultiplayerDump);
+  const onBagCountUpdateRef = useRef(onBagCountUpdate);
+  const onWinRef = useRef(onWin);
+  const gameStartTimeoutRef = useRef(null);
+  const sharedBagRef = useRef([]);
 
   useEffect(() => {
     lobbyPlayersRef.current = lobbyPlayers;
@@ -39,7 +61,167 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
     onNotifyRef.current = onNotify;
   }, [onNotify]);
 
+  useEffect(() => {
+    onCountdownStartRef.current = onCountdownStart;
+  }, [onCountdownStart]);
+
+  useEffect(() => {
+    onMultiplayerDrawRef.current = onMultiplayerDraw;
+  }, [onMultiplayerDraw]);
+
+  useEffect(() => {
+    onMultiplayerDumpRef.current = onMultiplayerDump;
+  }, [onMultiplayerDump]);
+
+  useEffect(() => {
+    onBagCountUpdateRef.current = onBagCountUpdate;
+  }, [onBagCountUpdate]);
+
+  useEffect(() => {
+    onWinRef.current = onWin;
+  }, [onWin]);
+
+  const createShuffledBag = useCallback(() => {
+    const tiles = [];
+    let tileId = 0;
+
+    Object.entries(TILE_DISTRIBUTION).forEach(([letter, count]) => {
+      for (let i = 0; i < count; i += 1) {
+        tiles.push({ id: tileId, letter });
+        tileId += 1;
+      }
+    });
+
+    for (let i = tiles.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+    }
+
+    return tiles;
+  }, []);
+
+  const drawFromSharedBag = useCallback((count) => {
+    if (!Number.isFinite(count) || count <= 0) {
+      return [];
+    }
+
+    const drawCount = Math.min(Math.floor(count), sharedBagRef.current.length);
+    if (drawCount <= 0) {
+      return [];
+    }
+
+    return sharedBagRef.current.splice(0, drawCount);
+  }, []);
+
+  const broadcastBagCount = useCallback(() => {
+    const remainingBagCount = sharedBagRef.current.length;
+
+    hostConnectionsRef.current.forEach((connection) => {
+      if (!connection.open) return;
+      connection.send({ type: 'bag-count-update', remainingBagCount });
+    });
+
+    onBagCountUpdateRef.current?.(remainingBagCount);
+  }, []);
+
+  const broadcastNotification = useCallback((message, excludedPeerId = null) => {
+    const normalizedMessage = String(message || '').trim();
+    if (!normalizedMessage) return;
+
+    const normalizedExcludedPeerId = typeof excludedPeerId === 'string'
+      ? excludedPeerId.trim()
+      : '';
+
+    hostConnectionsRef.current.forEach((connection) => {
+      if (!connection.open) return;
+      if (normalizedExcludedPeerId && connection.peer === normalizedExcludedPeerId) return;
+      connection.send({ type: 'player-action', message: normalizedMessage });
+    });
+
+    if (!normalizedExcludedPeerId || currentPeerId !== normalizedExcludedPeerId) {
+      onNotifyRef.current?.(normalizedMessage);
+    }
+  }, [currentPeerId]);
+
+  const broadcastPlayerAction = useCallback((playerId, actionType) => {
+    const normalizedAction = String(actionType || '').trim();
+    if (!playerId || !normalizedAction) return;
+
+    const player = lobbyPlayersRef.current.find((entry) => entry.id === playerId);
+    const username = player?.username?.trim();
+    if (!username) return;
+
+    broadcastNotification(`${username} ${normalizedAction}`, playerId);
+  }, [broadcastNotification]);
+
+  const processPeelRequest = useCallback((playerId) => {
+    const player = lobbyPlayersRef.current.find((entry) => entry.id === playerId);
+    const username = player?.username?.trim() || 'A player';
+    const playersInGame = lobbyPlayersRef.current.filter((entry) => entry.status === IN_GAME_STATUS);
+
+    if (playersInGame.length === 0) {
+      return { ok: false, notification: null };
+    }
+
+    if (sharedBagRef.current.length < playersInGame.length) {
+      return {
+        ok: false,
+        notification: `${username} has won!`,
+      };
+    }
+
+    const dealtTilesByPlayer = new Map();
+    playersInGame.forEach((entry) => {
+      dealtTilesByPlayer.set(entry.id, drawFromSharedBag(1));
+    });
+
+    return {
+      ok: true,
+      dealtTilesByPlayer,
+      remainingBagCount: sharedBagRef.current.length,
+      notification: `${username} peeled`,
+    };
+  }, [drawFromSharedBag]);
+
+  const shuffleBag = useCallback(() => {
+    for (let i = sharedBagRef.current.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [sharedBagRef.current[i], sharedBagRef.current[j]] = [sharedBagRef.current[j], sharedBagRef.current[i]];
+    }
+  }, []);
+
+  const processDumpRequest = useCallback((tile) => {
+    const tileId = Number(tile?.id);
+    const tileLetter = String(tile?.letter || '').trim();
+
+    if (!Number.isFinite(tileId) || !tileLetter) {
+      return { ok: false, reason: 'Invalid dump request.' };
+    }
+
+    if (sharedBagRef.current.length < 3) {
+      return { ok: false, reason: 'Not enough tiles in the bag to dump.' };
+    }
+
+    const drawnTiles = drawFromSharedBag(3);
+    sharedBagRef.current.push({ id: tileId, letter: tileLetter });
+    shuffleBag();
+
+    return {
+      ok: true,
+      removedTileId: tileId,
+      drawnTiles,
+      remainingBagCount: sharedBagRef.current.length,
+    };
+  }, [drawFromSharedBag, shuffleBag]);
+
   const cleanupPeerConnections = useCallback(() => {
+    if (gameStartTimeoutRef.current) {
+      window.clearTimeout(gameStartTimeoutRef.current);
+      gameStartTimeoutRef.current = null;
+    }
+
+    sharedBagRef.current = [];
+
     hostConnectionRef.current?.close();
     hostConnectionRef.current = null;
 
@@ -60,6 +242,7 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
     setLobbyPlayers([]);
     lobbyPlayersRef.current = [];
     setIsLobbyHost(false);
+    sharedBagRef.current = [];
   }, []);
 
   const syncLobbyPlayers = useCallback((nextPlayers) => {
@@ -99,7 +282,13 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
 
       peer.on('open', (id) => {
         opened = true;
-        const hostPlayer = { id, username: trimmedName, isHost: true, isReady: false };
+        const hostPlayer = {
+          id,
+          username: trimmedName,
+          isHost: true,
+          isReady: false,
+          status: NOT_READY_STATUS,
+        };
         setCurrentPeerId(id);
         setRoomCode(id);
         syncLobbyPlayers([hostPlayer]);
@@ -116,9 +305,88 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
             const requestedId = String(message.peerId || connection.peer).trim();
             const isReady = Boolean(message.isReady);
             const nextPlayers = lobbyPlayersRef.current.map((player) => (
-              player.id === requestedId ? { ...player, isReady } : player
+              player.id === requestedId
+                ? { ...player, isReady, status: isReady ? READY_STATUS : NOT_READY_STATUS }
+                : player
             ));
             syncLobbyPlayers(nextPlayers);
+            return;
+          }
+
+          if (message.type === 'draw-request') {
+            const requestedCount = Number(message.count);
+
+            if (message.actionType === 'peels') {
+              const peelResult = processPeelRequest(connection.peer);
+
+              if (!peelResult.ok) {
+                if (peelResult.notification) {
+                  broadcastNotification(peelResult.notification, connection.peer);
+                  onWinRef.current?.(peelResult.notification);
+                }
+                return;
+              }
+
+              const { dealtTilesByPlayer, remainingBagCount } = peelResult;
+
+              hostConnectionsRef.current.forEach((hostConnection) => {
+                if (!hostConnection.open) return;
+                hostConnection.send({
+                  type: 'draw-result',
+                  tiles: dealtTilesByPlayer.get(hostConnection.peer) || [],
+                  remainingBagCount,
+                });
+              });
+
+              onMultiplayerDrawRef.current?.(
+                dealtTilesByPlayer.get(currentPeerId) || [],
+                remainingBagCount,
+              );
+
+              broadcastBagCount();
+              broadcastNotification(peelResult.notification, connection.peer);
+              return;
+            }
+
+            const drawnTiles = drawFromSharedBag(requestedCount);
+            const remainingBagCount = sharedBagRef.current.length;
+
+            if (connection.open) {
+              connection.send({
+                type: 'draw-result',
+                tiles: drawnTiles,
+                remainingBagCount,
+              });
+            }
+
+            broadcastBagCount();
+            return;
+          }
+
+          if (message.type === 'dump-request') {
+            const result = processDumpRequest(message.tile);
+
+            if (!connection.open) {
+              return;
+            }
+
+            if (!result.ok) {
+              connection.send({
+                type: 'dump-rejected',
+                reason: result.reason || 'Unable to dump tile.',
+              });
+              return;
+            }
+
+            connection.send({
+              type: 'dump-result',
+              removedTileId: result.removedTileId,
+              tiles: result.drawnTiles,
+              remainingBagCount: result.remainingBagCount,
+            });
+
+            broadcastBagCount();
+            broadcastPlayerAction(connection.peer, 'dumped');
             return;
           }
 
@@ -150,7 +418,13 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
 
           const nextPlayers = [
             ...currentPlayers,
-            { id: requestedId, username: requestedName, isHost: false, isReady: false },
+            {
+              id: requestedId,
+              username: requestedName,
+              isHost: false,
+              isReady: false,
+              status: NOT_READY_STATUS,
+            },
           ];
           syncLobbyPlayers(nextPlayers);
 
@@ -185,7 +459,20 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
     };
 
     createHostPeer();
-  }, [cleanupPeerConnections, generateRoomCode, multiplayerUsername, resetMultiplayerState, syncLobbyPlayers]);
+  }, [
+    broadcastBagCount,
+    broadcastNotification,
+    broadcastPlayerAction,
+    cleanupPeerConnections,
+    currentPeerId,
+    drawFromSharedBag,
+    generateRoomCode,
+    multiplayerUsername,
+    processPeelRequest,
+    processDumpRequest,
+    resetMultiplayerState,
+    syncLobbyPlayers,
+  ]);
 
   const joinRoom = useCallback(() => {
     const trimmedName = multiplayerUsername.trim();
@@ -258,7 +545,64 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
         }
 
         if (message.type === 'game-start') {
-          onGameStartRef.current?.();
+          const initialTiles = Array.isArray(message.initialTiles) ? message.initialTiles : [];
+          const remainingBagCount = Number(message.remainingBagCount);
+          onGameStartRef.current?.({
+            initialTiles,
+            remainingBagCount: Number.isFinite(remainingBagCount) ? remainingBagCount : 0,
+          });
+          return;
+        }
+
+        if (message.type === 'draw-result') {
+          const tiles = Array.isArray(message.tiles) ? message.tiles : [];
+          const remainingBagCount = Number(message.remainingBagCount);
+          onMultiplayerDrawRef.current?.(
+            tiles,
+            Number.isFinite(remainingBagCount) ? remainingBagCount : 0,
+          );
+          return;
+        }
+
+        if (message.type === 'dump-result') {
+          const tiles = Array.isArray(message.tiles) ? message.tiles : [];
+          const removedTileId = Number(message.removedTileId);
+          const remainingBagCount = Number(message.remainingBagCount);
+          onMultiplayerDumpRef.current?.({
+            removedTileId: Number.isFinite(removedTileId) ? removedTileId : null,
+            drawnTiles: tiles,
+            remainingBagCount: Number.isFinite(remainingBagCount) ? remainingBagCount : 0,
+          });
+          return;
+        }
+
+        if (message.type === 'dump-rejected') {
+          const reason = String(message.reason || 'Unable to dump tile.');
+          onNotifyRef.current?.(reason);
+          return;
+        }
+
+        if (message.type === 'bag-count-update') {
+          const remainingBagCount = Number(message.remainingBagCount);
+          if (Number.isFinite(remainingBagCount)) {
+            onBagCountUpdateRef.current?.(remainingBagCount);
+          }
+          return;
+        }
+
+        if (message.type === 'game-countdown') {
+          const seconds = Number(message.seconds);
+          if (Number.isFinite(seconds) && seconds > 0) {
+            onCountdownStartRef.current?.(seconds);
+          }
+          return;
+        }
+
+        if (message.type === 'player-action') {
+          const actionMessage = String(message.message || '').trim();
+          if (actionMessage) {
+            onNotifyRef.current?.(actionMessage);
+          }
           return;
         }
 
@@ -311,14 +655,18 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
 
     if (isLobbyHost) {
       const nextPlayers = lobbyPlayersRef.current.map((player) => (
-        player.id === currentPeerId ? { ...player, isReady: nextReady } : player
+        player.id === currentPeerId
+          ? { ...player, isReady: nextReady, status: nextReady ? READY_STATUS : NOT_READY_STATUS }
+          : player
       ));
       syncLobbyPlayers(nextPlayers);
       return;
     }
 
     const nextPlayers = lobbyPlayersRef.current.map((player) => (
-      player.id === currentPeerId ? { ...player, isReady: nextReady } : player
+      player.id === currentPeerId
+        ? { ...player, isReady: nextReady, status: nextReady ? READY_STATUS : NOT_READY_STATUS }
+        : player
     ));
     setLobbyPlayers(nextPlayers);
     lobbyPlayersRef.current = nextPlayers;
@@ -334,19 +682,148 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
 
   const startGame = useCallback(() => {
     if (!isLobbyHost) return;
+    if (gameStartTimeoutRef.current) return;
 
     const allReady = lobbyPlayersRef.current.length > 0
       && lobbyPlayersRef.current.every((player) => Boolean(player.isReady));
 
     if (!allReady) return;
 
+    const nextPlayers = lobbyPlayersRef.current.map((player) => ({
+      ...player,
+      status: IN_GAME_STATUS,
+    }));
+
+    syncLobbyPlayers(nextPlayers);
+
+    const countdownSeconds = 3;
+
     hostConnectionsRef.current.forEach((connection) => {
       if (!connection.open) return;
-      connection.send({ type: 'game-start' });
+      connection.send({ type: 'game-countdown', seconds: countdownSeconds });
     });
 
-    onGameStartRef.current?.();
-  }, [isLobbyHost]);
+    onCountdownStartRef.current?.(countdownSeconds);
+
+    gameStartTimeoutRef.current = window.setTimeout(() => {
+      gameStartTimeoutRef.current = null;
+
+      const fullBag = createShuffledBag();
+      const allocatedTilesByPlayer = new Map();
+
+      lobbyPlayersRef.current.forEach((player) => {
+        const initialTiles = fullBag.splice(0, Math.min(21, fullBag.length));
+        allocatedTilesByPlayer.set(player.id, initialTiles);
+      });
+
+      sharedBagRef.current = fullBag;
+      const remainingBagCount = sharedBagRef.current.length;
+
+      hostConnectionsRef.current.forEach((connection) => {
+        if (!connection.open) return;
+        connection.send({
+          type: 'game-start',
+          initialTiles: allocatedTilesByPlayer.get(connection.peer) || [],
+          remainingBagCount,
+        });
+      });
+
+      hostConnectionsRef.current.forEach((connection) => {
+        if (!connection.open) return;
+        connection.send({ type: 'bag-count-update', remainingBagCount });
+      });
+
+      onGameStartRef.current?.({
+        initialTiles: allocatedTilesByPlayer.get(currentPeerId) || [],
+        remainingBagCount,
+      });
+      onBagCountUpdateRef.current?.(remainingBagCount);
+    }, countdownSeconds * 1000);
+  }, [createShuffledBag, currentPeerId, isLobbyHost, syncLobbyPlayers]);
+
+  const requestMultiplayerDraw = useCallback((count, actionType = null) => {
+    if (!Number.isFinite(count) || count <= 0) return;
+
+    const requestedCount = Math.floor(count);
+    const normalizedActionType = typeof actionType === 'string' ? actionType.trim() : '';
+
+    if (isLobbyHost) {
+      if (normalizedActionType === 'peels') {
+        const peelResult = processPeelRequest(currentPeerId);
+
+        if (!peelResult.ok) {
+          if (peelResult.notification) {
+            broadcastNotification(peelResult.notification, currentPeerId);
+            onWinRef.current?.(peelResult.notification);
+          }
+          return;
+        }
+
+        const { dealtTilesByPlayer, remainingBagCount } = peelResult;
+
+        hostConnectionsRef.current.forEach((connection) => {
+          if (!connection.open) return;
+          connection.send({
+            type: 'draw-result',
+            tiles: dealtTilesByPlayer.get(connection.peer) || [],
+            remainingBagCount,
+          });
+        });
+
+        onMultiplayerDrawRef.current?.(
+          dealtTilesByPlayer.get(currentPeerId) || [],
+          remainingBagCount,
+        );
+        broadcastBagCount();
+        broadcastNotification(peelResult.notification, currentPeerId);
+        return;
+      }
+
+      const drawnTiles = drawFromSharedBag(requestedCount);
+      const remainingBagCount = sharedBagRef.current.length;
+      onMultiplayerDrawRef.current?.(drawnTiles, remainingBagCount);
+      broadcastBagCount();
+      return;
+    }
+
+    if (!hostConnectionRef.current?.open) return;
+    hostConnectionRef.current.send({
+      type: 'draw-request',
+      count: requestedCount,
+      actionType: normalizedActionType || undefined,
+    });
+  }, [broadcastBagCount, broadcastNotification, currentPeerId, drawFromSharedBag, isLobbyHost, processPeelRequest]);
+
+  const requestMultiplayerDump = useCallback((tile) => {
+    const tileId = Number(tile?.id);
+    const tileLetter = String(tile?.letter || '').trim();
+
+    if (!Number.isFinite(tileId) || !tileLetter) return;
+
+    if (isLobbyHost) {
+      const result = processDumpRequest({ id: tileId, letter: tileLetter });
+
+      if (!result.ok) {
+        onNotifyRef.current?.(result.reason || 'Unable to dump tile.');
+        return;
+      }
+
+      onMultiplayerDumpRef.current?.({
+        removedTileId: result.removedTileId,
+        drawnTiles: result.drawnTiles,
+        remainingBagCount: result.remainingBagCount,
+      });
+      broadcastBagCount();
+      broadcastPlayerAction(currentPeerId, 'dumped');
+      return;
+    }
+
+    if (!hostConnectionRef.current?.open) return;
+    hostConnectionRef.current.send({
+      type: 'dump-request',
+      tile: { id: tileId, letter: tileLetter },
+    });
+  }, [broadcastBagCount, broadcastPlayerAction, currentPeerId, isLobbyHost, processDumpRequest]);
 
   const leaveLobby = useCallback(() => {
     if (isLobbyHost) {
@@ -388,6 +865,8 @@ export function useMultiplayer({ onEnterLobby, onGameStart, onReturnToMenu, onNo
     joinRoom,
     toggleReady,
     startGame,
+    requestMultiplayerDraw,
+    requestMultiplayerDump,
     leaveLobby,
   };
 }

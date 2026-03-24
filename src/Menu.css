@@ -11,7 +11,8 @@
 /* Background layer — same gradient as .game-container, blurred */
 .menu-bg {
   position: absolute;
-  inset: -16px; /* oversized so blur doesn't leave white edges */
+  inset: -16px;
+  /* oversized so blur doesn't leave white edges */
   background:
     radial-gradient(circle at top, rgba(72, 104, 81, 0.22), transparent 38%),
     radial-gradient(circle at bottom left, rgba(31, 58, 43, 0.36), transparent 32%),
@@ -46,7 +47,7 @@
 
 .menu-title {
   margin: 0 0 2.5rem;
-  font-size: clamp(2rem, 10vw, 5rem);
+  font-size: clamp(1.5rem, 7vw, 5rem);
   line-height: 1;
   letter-spacing: clamp(0.1em, 2vw, 0.22em);
   color: rgba(236, 244, 232, 0.9);

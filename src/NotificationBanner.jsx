@@ -1,7 +1,7 @@
 import PropTypes from 'prop-types';
 import './NotificationBanner.css';
 
-export default function NotificationBanner({ message, visible }) {
+export default function NotificationBanner({ message = '', visible = false }) {
   if (!visible || !message) {
     return null;
   }
@@ -16,9 +16,4 @@ export default function NotificationBanner({ message, visible }) {
 NotificationBanner.propTypes = {
   message: PropTypes.string,
   visible: PropTypes.bool,
-};
-
-NotificationBanner.defaultProps = {
-  message: '',
-  visible: false,
 };
