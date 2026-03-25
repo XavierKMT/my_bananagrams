@@ -10,7 +10,7 @@ export default function MultiplayerSetup({
   onCreateRoom,
   onJoinRoom,
   onBack,
-  error,
+  error = '',
 }) {
   const isJoinMode = mode === 'join';
   const trimmedName = username.trim();
@@ -79,8 +79,4 @@ MultiplayerSetup.propTypes = {
   onJoinRoom: PropTypes.func.isRequired,
   onBack: PropTypes.func.isRequired,
   error: PropTypes.string,
-};
-
-MultiplayerSetup.defaultProps = {
-  error: '',
 };

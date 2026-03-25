@@ -138,6 +138,16 @@ function Tile({ tileId, letter, position, onPositionChange, groupId, borderSides
 
   const handleMouseDown = (e) => handlePressStart(e.clientX, e.clientY, e);
   const handleTouchStart = (e) => handlePressStart(e.touches[0].clientX, e.touches[0].clientY, e);
+  const handleTouchStartRef = useRef(handleTouchStart);
+  handleTouchStartRef.current = handleTouchStart;
+
+  useEffect(() => {
+    const el = tileRef.current;
+    if (!el) return undefined;
+    const handler = (e) => handleTouchStartRef.current(e);
+    el.addEventListener('touchstart', handler, { passive: false });
+    return () => el.removeEventListener('touchstart', handler);
+  }, []);
 
   const style = {
     left: `${position.x}px`,
@@ -162,7 +172,6 @@ function Tile({ tileId, letter, position, onPositionChange, groupId, borderSides
       className={`tile ${isDragging ? 'dragging' : ''} ${groupId !== undefined ? 'grouped' : ''}`}
       style={style}
       onMouseDown={handleMouseDown}
-      onTouchStart={handleTouchStart}
     >
       <div className={`tile-face ${groupId !== undefined ? borderClassName : ''} ${dictionaryClassName}`.trim()}>
         <span className="tile-letter">{letter}</span>

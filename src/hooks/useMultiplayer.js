@@ -16,6 +16,7 @@ export function useMultiplayer({
   onMultiplayerDraw,
   onMultiplayerDump,
   onBagCountUpdate,
+  onBoardSnapshot,
 }) {
   const [multiplayerUsername, setMultiplayerUsername] = useState('');
   const [multiplayerError, setMultiplayerError] = useState('');
@@ -38,8 +39,11 @@ export function useMultiplayer({
   const onMultiplayerDumpRef = useRef(onMultiplayerDump);
   const onBagCountUpdateRef = useRef(onBagCountUpdate);
   const onWinRef = useRef(onWin);
+  const onBoardSnapshotRef = useRef(onBoardSnapshot);
   const gameStartTimeoutRef = useRef(null);
   const sharedBagRef = useRef([]);
+  const playerBoardSnapshotsRef = useRef(new Map());
+  const boardSubscribersRef = useRef(new Map());
 
   useEffect(() => {
     lobbyPlayersRef.current = lobbyPlayers;
@@ -80,6 +84,10 @@ export function useMultiplayer({
   useEffect(() => {
     onWinRef.current = onWin;
   }, [onWin]);
+
+  useEffect(() => {
+    onBoardSnapshotRef.current = onBoardSnapshot;
+  }, [onBoardSnapshot]);
 
   const createShuffledBag = useCallback(() => {
     const tiles = [];
@@ -143,6 +151,18 @@ export function useMultiplayer({
     }
   }, [currentPeerId]);
 
+  const broadcastWinState = useCallback((message) => {
+    const normalizedMessage = String(message || '').trim();
+    if (!normalizedMessage) return;
+
+    hostConnectionsRef.current.forEach((connection) => {
+      if (!connection.open) return;
+      connection.send({ type: 'win-state', message: normalizedMessage });
+    });
+
+    onWinRef.current?.(normalizedMessage);
+  }, []);
+
   const broadcastPlayerAction = useCallback((playerId, actionType) => {
     const normalizedAction = String(actionType || '').trim();
     if (!playerId || !normalizedAction) return;
@@ -183,6 +203,28 @@ export function useMultiplayer({
     };
   }, [drawFromSharedBag]);
 
+  const processBananasRequest = useCallback((playerId) => {
+    const player = lobbyPlayersRef.current.find((entry) => entry.id === playerId);
+    const username = player?.username?.trim() || 'A player';
+    const playersInGame = lobbyPlayersRef.current.filter((entry) => entry.status === IN_GAME_STATUS);
+
+    if (playersInGame.length === 0) {
+      return { ok: false, reason: 'No players are currently in game.' };
+    }
+
+    if (sharedBagRef.current.length >= playersInGame.length) {
+      return {
+        ok: false,
+        reason: 'Bananas is only available when fewer tiles than players remain in the bag.',
+      };
+    }
+
+    return {
+      ok: true,
+      notification: `${username} has won!`,
+    };
+  }, []);
+
   const shuffleBag = useCallback(() => {
     for (let i = sharedBagRef.current.length - 1; i > 0; i -= 1) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -221,6 +263,8 @@ export function useMultiplayer({
     }
 
     sharedBagRef.current = [];
+    playerBoardSnapshotsRef.current.clear();
+    boardSubscribersRef.current.clear();
 
     hostConnectionRef.current?.close();
     hostConnectionRef.current = null;
@@ -243,6 +287,24 @@ export function useMultiplayer({
     lobbyPlayersRef.current = [];
     setIsLobbyHost(false);
     sharedBagRef.current = [];
+    playerBoardSnapshotsRef.current.clear();
+    boardSubscribersRef.current.clear();
+  }, []);
+
+  const removeBoardSubscriptionsForPeer = useCallback((peerId) => {
+    const normalizedPeerId = String(peerId || '').trim();
+    if (!normalizedPeerId) return;
+
+    boardSubscribersRef.current.delete(normalizedPeerId);
+
+    boardSubscribersRef.current.forEach((subscriberIds, targetPlayerId) => {
+      if (!subscriberIds.has(normalizedPeerId)) return;
+
+      subscriberIds.delete(normalizedPeerId);
+      if (subscriberIds.size === 0) {
+        boardSubscribersRef.current.delete(targetPlayerId);
+      }
+    });
   }, []);
 
   const syncLobbyPlayers = useCallback((nextPlayers) => {
@@ -301,6 +363,17 @@ export function useMultiplayer({
         connection.on('data', (message) => {
           if (!message) return;
 
+          if (message.type === 'return-to-lobby') {
+            const requestedId = String(message.peerId || connection.peer).trim();
+            const nextPlayers = lobbyPlayersRef.current.map((player) => (
+              player.id === requestedId
+                ? { ...player, isReady: true, status: READY_STATUS }
+                : player
+            ));
+            syncLobbyPlayers(nextPlayers);
+            return;
+          }
+
           if (message.type === 'ready-toggle') {
             const requestedId = String(message.peerId || connection.peer).trim();
             const isReady = Boolean(message.isReady);
@@ -322,7 +395,7 @@ export function useMultiplayer({
               if (!peelResult.ok) {
                 if (peelResult.notification) {
                   broadcastNotification(peelResult.notification, connection.peer);
-                  onWinRef.current?.(peelResult.notification);
+                  broadcastWinState(peelResult.notification);
                 }
                 return;
               }
@@ -390,6 +463,74 @@ export function useMultiplayer({
             return;
           }
 
+          if (message.type === 'bananas-request') {
+            const result = processBananasRequest(connection.peer);
+
+            if (!connection.open) {
+              return;
+            }
+
+            if (!result.ok) {
+              connection.send({
+                type: 'bananas-rejected',
+                reason: result.reason || 'Bananas is not available right now.',
+              });
+              return;
+            }
+
+            broadcastNotification(result.notification, connection.peer);
+            broadcastWinState(result.notification);
+            return;
+          }
+
+          if (message.type === 'board-snapshot') {
+            const playerId = String(connection.peer || '').trim();
+            const snapshot = message.snapshot;
+            console.log('[Board] Host received board snapshot from player:', playerId, snapshot);
+            if (playerId && snapshot) {
+              playerBoardSnapshotsRef.current.set(playerId, snapshot);
+              onBoardSnapshotRef.current?.(playerId, snapshot);
+
+              const subscriberIds = boardSubscribersRef.current.get(playerId);
+              if (subscriberIds?.size) {
+                subscriberIds.forEach((subscriberId) => {
+                  const subscriberConnection = hostConnectionsRef.current.get(subscriberId);
+                  if (!subscriberConnection?.open) return;
+                  subscriberConnection.send({
+                    type: 'board-data',
+                    playerId,
+                    snapshot,
+                  });
+                });
+              }
+            }
+            return;
+          }
+
+          if (message.type === 'subscribe-board') {
+            const subscriberId = String(connection.peer || '').trim();
+            const requestedPlayerId = String(message.targetPlayerId || '').trim();
+            if (!subscriberId || !requestedPlayerId) return;
+
+            let subscriberIds = boardSubscribersRef.current.get(requestedPlayerId);
+            if (!subscriberIds) {
+              subscriberIds = new Set();
+              boardSubscribersRef.current.set(requestedPlayerId, subscriberIds);
+            }
+            subscriberIds.add(subscriberId);
+
+            const boardSnapshot = playerBoardSnapshotsRef.current.get(requestedPlayerId);
+            console.log('[Board] Host received subscribe request for player:', requestedPlayerId, '| snapshot available:', !!boardSnapshot);
+            if (boardSnapshot && connection.open) {
+              connection.send({
+                type: 'board-data',
+                playerId: requestedPlayerId,
+                snapshot: boardSnapshot,
+              });
+            }
+            return;
+          }
+
           if (message.type !== 'join-request') return;
 
           const requestedName = String(message.username || '').trim();
@@ -437,6 +578,8 @@ export function useMultiplayer({
 
         const removePlayer = () => {
           hostConnectionsRef.current.delete(connection.peer);
+          playerBoardSnapshotsRef.current.delete(connection.peer);
+          removeBoardSubscriptionsForPeer(connection.peer);
           const nextPlayers = lobbyPlayersRef.current.filter((player) => player.id !== connection.peer);
           syncLobbyPlayers(nextPlayers);
         };
@@ -462,6 +605,7 @@ export function useMultiplayer({
   }, [
     broadcastBagCount,
     broadcastNotification,
+    broadcastWinState,
     broadcastPlayerAction,
     cleanupPeerConnections,
     currentPeerId,
@@ -470,6 +614,8 @@ export function useMultiplayer({
     multiplayerUsername,
     processPeelRequest,
     processDumpRequest,
+    processBananasRequest,
+    removeBoardSubscriptionsForPeer,
     resetMultiplayerState,
     syncLobbyPlayers,
   ]);
@@ -582,6 +728,12 @@ export function useMultiplayer({
           return;
         }
 
+        if (message.type === 'bananas-rejected') {
+          const reason = String(message.reason || 'Bananas is not available right now.');
+          onNotifyRef.current?.(reason);
+          return;
+        }
+
         if (message.type === 'bag-count-update') {
           const remainingBagCount = Number(message.remainingBagCount);
           if (Number.isFinite(remainingBagCount)) {
@@ -602,6 +754,25 @@ export function useMultiplayer({
           const actionMessage = String(message.message || '').trim();
           if (actionMessage) {
             onNotifyRef.current?.(actionMessage);
+          }
+          return;
+        }
+
+        if (message.type === 'win-state') {
+          const winMessage = String(message.message || '').trim();
+          if (winMessage) {
+            onWinRef.current?.(winMessage);
+          }
+          return;
+        }
+
+        if (message.type === 'board-data') {
+          const playerId = String(message.playerId || '').trim();
+          const snapshot = message.snapshot;
+          console.log('[Board] User received board data from host for player:', playerId, snapshot);
+          if (playerId && snapshot) {
+            playerBoardSnapshotsRef.current.set(playerId, snapshot);
+            onBoardSnapshotRef.current?.(playerId, snapshot);
           }
           return;
         }
@@ -685,7 +856,9 @@ export function useMultiplayer({
     if (gameStartTimeoutRef.current) return;
 
     const allReady = lobbyPlayersRef.current.length > 0
-      && lobbyPlayersRef.current.every((player) => Boolean(player.isReady));
+      && lobbyPlayersRef.current.every(
+        (player) => Boolean(player.isReady) && player.status === READY_STATUS,
+      );
 
     if (!allReady) return;
 
@@ -754,7 +927,7 @@ export function useMultiplayer({
         if (!peelResult.ok) {
           if (peelResult.notification) {
             broadcastNotification(peelResult.notification, currentPeerId);
-            onWinRef.current?.(peelResult.notification);
+            broadcastWinState(peelResult.notification);
           }
           return;
         }
@@ -792,7 +965,7 @@ export function useMultiplayer({
       count: requestedCount,
       actionType: normalizedActionType || undefined,
     });
-  }, [broadcastBagCount, broadcastNotification, currentPeerId, drawFromSharedBag, isLobbyHost, processPeelRequest]);
+  }, [broadcastBagCount, broadcastNotification, broadcastWinState, currentPeerId, drawFromSharedBag, isLobbyHost, processPeelRequest]);
 
   const requestMultiplayerDump = useCallback((tile) => {
     const tileId = Number(tile?.id);
@@ -825,6 +998,92 @@ export function useMultiplayer({
     });
   }, [broadcastBagCount, broadcastPlayerAction, currentPeerId, isLobbyHost, processDumpRequest]);
 
+  const requestMultiplayerBananas = useCallback(() => {
+    if (isLobbyHost) {
+      const result = processBananasRequest(currentPeerId);
+
+      if (!result.ok) {
+        onNotifyRef.current?.(result.reason || 'Bananas is not available right now.');
+        return;
+      }
+
+      broadcastNotification(result.notification, currentPeerId);
+      broadcastWinState(result.notification);
+      return;
+    }
+
+    if (!hostConnectionRef.current?.open) return;
+    hostConnectionRef.current.send({ type: 'bananas-request' });
+  }, [broadcastNotification, broadcastWinState, currentPeerId, isLobbyHost, processBananasRequest]);
+
+  const sendBoardSnapshot = useCallback((tiles, groups) => {
+    // Flatten tile positions for serialization (position: { x, y } -> x, y at root)
+    const flattenedTiles = Array.isArray(tiles)
+      ? tiles.map((tile) => ({
+        id: tile.id,
+        letter: tile.letter,
+        x: tile.position?.x || 0,
+        y: tile.position?.y || 0,
+      }))
+      : [];
+
+    const snapshot = {
+      tiles: flattenedTiles,
+      groups: groups instanceof Map ? Array.from(groups.entries()) : [],
+    };
+
+    if (isLobbyHost) {
+      const playerId = String(currentPeerId || '').trim();
+      if (playerId) {
+        playerBoardSnapshotsRef.current.set(playerId, snapshot);
+        const subscriberIds = boardSubscribersRef.current.get(playerId);
+        if (subscriberIds?.size) {
+          subscriberIds.forEach((subscriberId) => {
+            const subscriberConnection = hostConnectionsRef.current.get(subscriberId);
+            if (!subscriberConnection?.open) return;
+            subscriberConnection.send({
+              type: 'board-data',
+              playerId,
+              snapshot,
+            });
+          });
+        }
+      }
+      return;
+    }
+
+    console.log('[Board] User sending board snapshot to host:', snapshot);
+    if (!hostConnectionRef.current?.open) return;
+    hostConnectionRef.current.send({
+      type: 'board-snapshot',
+      snapshot,
+    });
+  }, [currentPeerId, isLobbyHost]);
+
+  const subscribeToBoardSnapshot = useCallback((targetPlayerId) => {
+    console.log('[Board] User sending subscribe request for player:', targetPlayerId);
+    if (!hostConnectionRef.current?.open) return;
+    hostConnectionRef.current.send({
+      type: 'subscribe-board',
+      targetPlayerId: String(targetPlayerId || '').trim(),
+    });
+  }, []);
+
+  const returnToLobby = useCallback(() => {
+    if (isLobbyHost) {
+      const nextPlayers = lobbyPlayersRef.current.map((player) => (
+        player.id === currentPeerId
+          ? { ...player, isReady: true, status: READY_STATUS }
+          : player
+      ));
+      syncLobbyPlayers(nextPlayers);
+      return;
+    }
+
+    if (!hostConnectionRef.current?.open) return;
+    hostConnectionRef.current.send({ type: 'return-to-lobby', peerId: currentPeerId });
+  }, [currentPeerId, isLobbyHost, syncLobbyPlayers]);
+
   const leaveLobby = useCallback(() => {
     if (isLobbyHost) {
       hostConnectionsRef.current.forEach((connection) => {
@@ -844,7 +1103,9 @@ export function useMultiplayer({
   }, [cleanupPeerConnections]);
 
   const allPlayersReady = lobbyPlayers.length > 0
-    && lobbyPlayers.every((player) => Boolean(player.isReady));
+    && lobbyPlayers.every(
+      (player) => Boolean(player.isReady) && player.status === READY_STATUS,
+    );
   const currentPlayer = lobbyPlayers.find((player) => player.id === currentPeerId);
   const currentPlayerReady = Boolean(currentPlayer?.isReady);
 
@@ -867,6 +1128,10 @@ export function useMultiplayer({
     startGame,
     requestMultiplayerDraw,
     requestMultiplayerDump,
+    requestMultiplayerBananas,
+    sendBoardSnapshot,
+    subscribeToBoardSnapshot,
+    returnToLobby,
     leaveLobby,
   };
 }

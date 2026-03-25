@@ -24,6 +24,8 @@ function App() {
   const [spectatedPlayerIndex, setSpectatedPlayerIndex] = useState(0);
   const [multiplayerCountdown, setMultiplayerCountdown] = useState(null);
   const [multiplayerWinner, setMultiplayerWinner] = useState(null);
+  const [singlePlayerWon, setSinglePlayerWon] = useState(false);
+  const [playerBoardSnapshots, setPlayerBoardSnapshots] = useState(new Map());
   const [notification, setNotification] = useState({
     message: '',
     visible: false,
@@ -97,6 +99,7 @@ function App() {
 
     setBagTiles(allTiles);
     setTiles([]);
+    setSinglePlayerWon(false);
     resetGroupingState();
     setDumpMode(false);
     centerCameraOnBoard();
@@ -116,6 +119,7 @@ function App() {
   const handleMultiplayerReturnToMenu = useCallback(() => {
     setMultiplayerCountdown(null);
     setMultiplayerWinner(null);
+    setSinglePlayerWon(false);
     setGameMode(null);
     setMultiplayerTabOpen(false);
     setScreen('menu');
@@ -244,6 +248,7 @@ function App() {
 
     setMultiplayerCountdown(null);
     setGameMode('multiplayer');
+    setSinglePlayerWon(false);
     resetGroupingState();
     setDumpMode(false);
     centerCameraOnBoard();
@@ -289,9 +294,13 @@ function App() {
     createRoom,
     joinRoom,
     toggleReady,
+    returnToLobby,
     startGame,
     requestMultiplayerDraw,
     requestMultiplayerDump,
+    requestMultiplayerBananas,
+    sendBoardSnapshot,
+    subscribeToBoardSnapshot,
     leaveLobby,
   } = useMultiplayer({
     onEnterLobby: handleEnterLobby,
@@ -303,6 +312,13 @@ function App() {
     onMultiplayerDraw: handleMultiplayerDraw,
     onMultiplayerDump: handleMultiplayerDump,
     onBagCountUpdate: handleBagCountUpdate,
+    onBoardSnapshot: (playerId, snapshot) => {
+      setPlayerBoardSnapshots((prev) => {
+        const next = new Map(prev);
+        next.set(playerId, snapshot);
+        return next;
+      });
+    },
   });
 
   const handleReturnToMenu = useCallback(() => {
@@ -313,10 +329,31 @@ function App() {
     setGameMode(null);
     setMultiplayerCountdown(null);
     setMultiplayerWinner(null);
+    setSinglePlayerWon(false);
     setMultiplayerTabOpen(false);
     setScreen('menu');
     setMenuOpen(false);
   }, [gameMode, leaveLobby]);
+
+  const handleReturnToLobby = useCallback(() => {
+    if (gameMode !== 'multiplayer') {
+      return;
+    }
+
+    returnToLobby();
+    setMenuOpen(false);
+    setMultiplayerTabOpen(false);
+    setScreen('lobby');
+  }, [gameMode, returnToLobby]);
+
+  useEffect(() => {
+    const el = playAreaRef.current;
+    if (!el) return undefined;
+    el.addEventListener('wheel', handlePlayAreaWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handlePlayAreaWheel);
+    };
+  }, [screen, handlePlayAreaWheel, playAreaRef]);
 
   useEffect(() => {
     if (multiplayerCountdown === null) return undefined;
@@ -359,6 +396,13 @@ function App() {
     }
   }, [gameMode]);
 
+  // Send board snapshots when tiles or groups change (multiplayer only)
+  useEffect(() => {
+    if (gameMode !== 'multiplayer') return;
+
+    sendBoardSnapshot(tiles, groups);
+  }, [gameMode, tiles, groups, sendBoardSnapshot]);
+
   const currentLobbyPlayer = lobbyPlayers.find((player) => player.id === currentPeerId) || null;
   const spectatablePlayers = lobbyPlayers.filter(
     (player) => player.id !== currentPeerId && player.status === 'In game',
@@ -366,6 +410,32 @@ function App() {
   const activeSpectatedPlayer = spectatablePlayers.length > 0
     ? spectatablePlayers[Math.min(spectatedPlayerIndex, spectatablePlayers.length - 1)]
     : null;
+  const activeSpectatedSnapshot = activeSpectatedPlayer
+    ? playerBoardSnapshots.get(activeSpectatedPlayer.id)
+    : null;
+  const activeSpectatedTiles = Array.isArray(activeSpectatedSnapshot?.tiles)
+    ? activeSpectatedSnapshot.tiles
+    : [];
+  const spectatedMinX = activeSpectatedTiles.length > 0
+    ? Math.min(...activeSpectatedTiles.map((tile) => Number(tile?.x) || 0))
+    : 0;
+  const spectatedMinY = activeSpectatedTiles.length > 0
+    ? Math.min(...activeSpectatedTiles.map((tile) => Number(tile?.y) || 0))
+    : 0;
+  const spectateCoordinateScale = 0.66;
+  const spectatePadding = 8;
+  const normalizedSpectatedTiles = activeSpectatedTiles.map((tile) => ({
+    ...tile,
+    normalizedX: ((Number(tile?.x) || 0) - spectatedMinX) * spectateCoordinateScale + spectatePadding,
+    normalizedY: ((Number(tile?.y) || 0) - spectatedMinY) * spectateCoordinateScale + spectatePadding,
+  }));
+
+  // Subscribe to spectated player's board snapshot when selection changes or panel opens
+  useEffect(() => {
+    if (!multiplayerTabOpen || !activeSpectatedPlayer?.id) return;
+
+    subscribeToBoardSnapshot(activeSpectatedPlayer.id);
+  }, [multiplayerTabOpen, activeSpectatedPlayer?.id, subscribeToBoardSnapshot]);
 
   useEffect(() => {
     if (spectatablePlayers.length === 0) {
@@ -404,6 +474,16 @@ function App() {
     return player?.isReady ? 'ready' : 'not-ready';
   }, []);
 
+  const handleBananas = useCallback(() => {
+    if (gameMode === 'multiplayer') {
+      requestMultiplayerBananas();
+      return;
+    }
+
+    setSinglePlayerWon(true);
+    showNotification('Bananas! You won!');
+  }, [gameMode, requestMultiplayerBananas, showNotification]);
+
   const drawTiles = useCallback((count, actionType = null) => {
     if (bagTiles.length === 0) return;
 
@@ -420,6 +500,24 @@ function App() {
     setTiles((prev) => [...prev, ...newTiles]);
     setBagTiles(remaining);
   }, [bagTiles, gameMode, placeTilesInVisibleRegion, requestMultiplayerDraw, tiles]);
+
+  const playersInGameCount = lobbyPlayers.filter((player) => player.status === 'In game').length;
+  const tileConstraintMet = tiles.length > 0
+    && !hasUngroupedTiles
+    && tiles.every((tile) => groups.has(tile.id))
+    && new Set(groups.values()).size === 1;
+
+  const showBananasButton = tileConstraintMet && (
+    (gameMode !== 'multiplayer' && bagTiles.length === 0)
+    || (gameMode === 'multiplayer' && playersInGameCount > 0 && bagTiles.length < playersInGameCount)
+  );
+
+  const showPeelButton = tileConstraintMet
+    && !showBananasButton
+    && (
+      (gameMode !== 'multiplayer' && bagTiles.length > 0)
+      || (gameMode === 'multiplayer' && playersInGameCount > 0)
+    );
 
   const handleDumpModeToggle = useCallback(() => {
     if (dumpMode) {
@@ -910,6 +1008,7 @@ function App() {
               onClick={() => {
                 setSpectatedPlayerIndex(0);
                 setMultiplayerTabOpen(true);
+                console.log('[Multiplayer Panel] playerBoardSnapshots:', playerBoardSnapshots);
               }}
               aria-label="Open multiplayer player list"
             >
@@ -999,6 +1098,29 @@ function App() {
                           Other players will appear here once they are in game.
                         </p>
                       )}
+                      {activeSpectatedPlayer && activeSpectatedSnapshot && (
+                        <div className="spectated-board">
+                          {normalizedSpectatedTiles.map((tile) => (
+                            <div
+                              key={tile.id}
+                              className="spectated-tile"
+                              style={{
+                                left: `${tile.normalizedX}px`,
+                                top: `${tile.normalizedY}px`,
+                              }}
+                            >
+                              <div className="tile-content">
+                                {tile.letter}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {activeSpectatedPlayer && !activeSpectatedSnapshot && (
+                        <p className="multiplayer-carousel-empty">
+                          Loading board...
+                        </p>
+                      )}
                     </div>
                   </div>
                 </section>
@@ -1047,9 +1169,15 @@ function App() {
             </button>
           </div>
 
-          <div className="bag-info">
-            Tiles in bag: {bagTiles.length}
-          </div>
+          {gameMode === 'multiplayer' && multiplayerWinner ? (
+            <button className="btn" onClick={handleReturnToLobby}>
+              Return to Lobby
+            </button>
+          ) : (
+            <div className="bag-info">
+              {singlePlayerWon ? 'You win' : `Tiles in bag: ${bagTiles.length}`}
+            </div>
+          )}
 
           <div className="controls-actions">
             {(hasUngroupedTiles || dumpMode) && (
@@ -1061,15 +1189,16 @@ function App() {
                 {dumpMode ? 'Cancel Dump' : 'DUMP'}
               </button>
             )}
-            {tiles.length > 0 &&
-              bagTiles.length > 0 &&
-              !multiplayerWinner &&
-              tiles.every((t) => groups.has(t.id)) &&
-              new Set(groups.values()).size === 1 && (
-                <button className="btn" onClick={() => drawTiles(1, 'peels')}>
-                  PEEL
-                </button>
-              )}
+            {showPeelButton && !multiplayerWinner && (
+              <button className="btn" onClick={() => drawTiles(1, 'peels')}>
+                PEEL
+              </button>
+            )}
+            {showBananasButton && !multiplayerWinner && (
+              <button className="btn" onClick={handleBananas}>
+                BANANAS
+              </button>
+            )}
           </div>
         </div>
 
@@ -1083,7 +1212,6 @@ function App() {
         <div
           ref={playAreaRef}
           className={`play-area ${isPanningCamera ? 'camera-panning' : ''}`}
-          onWheel={handlePlayAreaWheel}
           onPointerDown={handlePlayAreaPointerDown}
           onPointerMove={handlePlayAreaPointerMove}
           onPointerUp={handlePlayAreaPointerUp}
