@@ -40,10 +40,10 @@ export function useMultiplayer({
   const onBagCountUpdateRef = useRef(onBagCountUpdate);
   const onWinRef = useRef(onWin);
   const onBoardSnapshotRef = useRef(onBoardSnapshot);
+  const intentionalLeaveRef = useRef(false);
   const gameStartTimeoutRef = useRef(null);
   const sharedBagRef = useRef([]);
   const playerBoardSnapshotsRef = useRef(new Map());
-  const boardSubscribersRef = useRef(new Map());
 
   useEffect(() => {
     lobbyPlayersRef.current = lobbyPlayers;
@@ -264,7 +264,6 @@ export function useMultiplayer({
 
     sharedBagRef.current = [];
     playerBoardSnapshotsRef.current.clear();
-    boardSubscribersRef.current.clear();
 
     hostConnectionRef.current?.close();
     hostConnectionRef.current = null;
@@ -281,6 +280,7 @@ export function useMultiplayer({
   }, []);
 
   const resetMultiplayerState = useCallback(() => {
+    intentionalLeaveRef.current = false;
     setCurrentPeerId('');
     setRoomCode('');
     setLobbyPlayers([]);
@@ -288,23 +288,6 @@ export function useMultiplayer({
     setIsLobbyHost(false);
     sharedBagRef.current = [];
     playerBoardSnapshotsRef.current.clear();
-    boardSubscribersRef.current.clear();
-  }, []);
-
-  const removeBoardSubscriptionsForPeer = useCallback((peerId) => {
-    const normalizedPeerId = String(peerId || '').trim();
-    if (!normalizedPeerId) return;
-
-    boardSubscribersRef.current.delete(normalizedPeerId);
-
-    boardSubscribersRef.current.forEach((subscriberIds, targetPlayerId) => {
-      if (!subscriberIds.has(normalizedPeerId)) return;
-
-      subscriberIds.delete(normalizedPeerId);
-      if (subscriberIds.size === 0) {
-        boardSubscribersRef.current.delete(targetPlayerId);
-      }
-    });
   }, []);
 
   const syncLobbyPlayers = useCallback((nextPlayers) => {
@@ -325,6 +308,7 @@ export function useMultiplayer({
   }, []);
 
   const createRoom = useCallback(() => {
+    intentionalLeaveRef.current = false;
     const trimmedName = multiplayerUsername.trim();
     if (!trimmedName) {
       setMultiplayerError('Enter a username first.');
@@ -491,41 +475,14 @@ export function useMultiplayer({
               playerBoardSnapshotsRef.current.set(playerId, snapshot);
               onBoardSnapshotRef.current?.(playerId, snapshot);
 
-              const subscriberIds = boardSubscribersRef.current.get(playerId);
-              if (subscriberIds?.size) {
-                subscriberIds.forEach((subscriberId) => {
-                  const subscriberConnection = hostConnectionsRef.current.get(subscriberId);
-                  if (!subscriberConnection?.open) return;
-                  subscriberConnection.send({
-                    type: 'board-data',
-                    playerId,
-                    snapshot,
-                  });
+              hostConnectionsRef.current.forEach((hostConnection) => {
+                if (!hostConnection.open) return;
+                if (hostConnection.peer === playerId) return;
+                hostConnection.send({
+                  type: 'board-data',
+                  playerId,
+                  snapshot,
                 });
-              }
-            }
-            return;
-          }
-
-          if (message.type === 'subscribe-board') {
-            const subscriberId = String(connection.peer || '').trim();
-            const requestedPlayerId = String(message.targetPlayerId || '').trim();
-            if (!subscriberId || !requestedPlayerId) return;
-
-            let subscriberIds = boardSubscribersRef.current.get(requestedPlayerId);
-            if (!subscriberIds) {
-              subscriberIds = new Set();
-              boardSubscribersRef.current.set(requestedPlayerId, subscriberIds);
-            }
-            subscriberIds.add(subscriberId);
-
-            const boardSnapshot = playerBoardSnapshotsRef.current.get(requestedPlayerId);
-            console.log('[Board] Host received subscribe request for player:', requestedPlayerId, '| snapshot available:', !!boardSnapshot);
-            if (boardSnapshot && connection.open) {
-              connection.send({
-                type: 'board-data',
-                playerId: requestedPlayerId,
-                snapshot: boardSnapshot,
               });
             }
             return;
@@ -579,7 +536,6 @@ export function useMultiplayer({
         const removePlayer = () => {
           hostConnectionsRef.current.delete(connection.peer);
           playerBoardSnapshotsRef.current.delete(connection.peer);
-          removeBoardSubscriptionsForPeer(connection.peer);
           const nextPlayers = lobbyPlayersRef.current.filter((player) => player.id !== connection.peer);
           syncLobbyPlayers(nextPlayers);
         };
@@ -615,12 +571,12 @@ export function useMultiplayer({
     processPeelRequest,
     processDumpRequest,
     processBananasRequest,
-    removeBoardSubscriptionsForPeer,
     resetMultiplayerState,
     syncLobbyPlayers,
   ]);
 
   const joinRoom = useCallback(() => {
+    intentionalLeaveRef.current = false;
     const trimmedName = multiplayerUsername.trim();
     if (!trimmedName) {
       setMultiplayerError('Enter a username first.');
@@ -791,6 +747,13 @@ export function useMultiplayer({
       });
 
       const failJoin = () => {
+        if (intentionalLeaveRef.current) {
+          window.clearTimeout(joinTimeout);
+          cleanupPeerConnections();
+          resetMultiplayerState();
+          return;
+        }
+
         if (hasJoinedLobby) {
           forceReturnToMainMenu('Host disconnected. Returning to main menu.');
           return;
@@ -806,6 +769,12 @@ export function useMultiplayer({
     });
 
     peer.on('error', () => {
+      if (intentionalLeaveRef.current) {
+        cleanupPeerConnections();
+        resetMultiplayerState();
+        return;
+      }
+
       if (hasJoinedLobby && forceReturnToMainMenu) {
         forceReturnToMainMenu('Host disconnected. Returning to main menu.');
         return;
@@ -1016,7 +985,7 @@ export function useMultiplayer({
     hostConnectionRef.current.send({ type: 'bananas-request' });
   }, [broadcastNotification, broadcastWinState, currentPeerId, isLobbyHost, processBananasRequest]);
 
-  const sendBoardSnapshot = useCallback((tiles, groups) => {
+  const sendBoardSnapshot = useCallback((tiles, tileSize) => {
     // Flatten tile positions for serialization (position: { x, y } -> x, y at root)
     const flattenedTiles = Array.isArray(tiles)
       ? tiles.map((tile) => ({
@@ -1029,25 +998,22 @@ export function useMultiplayer({
 
     const snapshot = {
       tiles: flattenedTiles,
-      groups: groups instanceof Map ? Array.from(groups.entries()) : [],
+      tileSize: Number.isFinite(tileSize) ? tileSize : 60,
     };
 
     if (isLobbyHost) {
       const playerId = String(currentPeerId || '').trim();
       if (playerId) {
         playerBoardSnapshotsRef.current.set(playerId, snapshot);
-        const subscriberIds = boardSubscribersRef.current.get(playerId);
-        if (subscriberIds?.size) {
-          subscriberIds.forEach((subscriberId) => {
-            const subscriberConnection = hostConnectionsRef.current.get(subscriberId);
-            if (!subscriberConnection?.open) return;
-            subscriberConnection.send({
-              type: 'board-data',
-              playerId,
-              snapshot,
-            });
+
+        hostConnectionsRef.current.forEach((connection) => {
+          if (!connection.open) return;
+          connection.send({
+            type: 'board-data',
+            playerId,
+            snapshot,
           });
-        }
+        });
       }
       return;
     }
@@ -1059,15 +1025,6 @@ export function useMultiplayer({
       snapshot,
     });
   }, [currentPeerId, isLobbyHost]);
-
-  const subscribeToBoardSnapshot = useCallback((targetPlayerId) => {
-    console.log('[Board] User sending subscribe request for player:', targetPlayerId);
-    if (!hostConnectionRef.current?.open) return;
-    hostConnectionRef.current.send({
-      type: 'subscribe-board',
-      targetPlayerId: String(targetPlayerId || '').trim(),
-    });
-  }, []);
 
   const returnToLobby = useCallback(() => {
     if (isLobbyHost) {
@@ -1085,6 +1042,8 @@ export function useMultiplayer({
   }, [currentPeerId, isLobbyHost, syncLobbyPlayers]);
 
   const leaveLobby = useCallback(() => {
+    intentionalLeaveRef.current = true;
+
     if (isLobbyHost) {
       hostConnectionsRef.current.forEach((connection) => {
         if (!connection.open) return;
@@ -1130,7 +1089,6 @@ export function useMultiplayer({
     requestMultiplayerDump,
     requestMultiplayerBananas,
     sendBoardSnapshot,
-    subscribeToBoardSnapshot,
     returnToLobby,
     leaveLobby,
   };

@@ -26,6 +26,8 @@ function App() {
   const [multiplayerWinner, setMultiplayerWinner] = useState(null);
   const [singlePlayerWon, setSinglePlayerWon] = useState(false);
   const [playerBoardSnapshots, setPlayerBoardSnapshots] = useState(new Map());
+  const [spectateCamera, setSpectateCamera] = useState({ x: 0, y: 0, scale: 1 });
+  const [isPanningSpectateCamera, setIsPanningSpectateCamera] = useState(false);
   const [notification, setNotification] = useState({
     message: '',
     visible: false,
@@ -34,9 +36,13 @@ function App() {
 
   const tileElementsRef = useRef(new Map());
   const playAreaRef = useRef(null);
+  const spectatePlayAreaRef = useRef(null);
   const tilesRef = useRef(tiles);
   const dragSessionRef = useRef(null);
   const isDraggingAnyRef = useRef(false);
+  const spectateCameraRef = useRef(spectateCamera);
+  const spectateActivePointersRef = useRef(new Map());
+  const spectateGestureRef = useRef({ mode: null });
 
   const {
     cameraRef,
@@ -300,7 +306,6 @@ function App() {
     requestMultiplayerDump,
     requestMultiplayerBananas,
     sendBoardSnapshot,
-    subscribeToBoardSnapshot,
     leaveLobby,
   } = useMultiplayer({
     onEnterLobby: handleEnterLobby,
@@ -396,12 +401,12 @@ function App() {
     }
   }, [gameMode]);
 
-  // Send board snapshots when tiles or groups change (multiplayer only)
+  // Send board snapshots when tiles change (multiplayer only)
   useEffect(() => {
     if (gameMode !== 'multiplayer') return;
 
-    sendBoardSnapshot(tiles, groups);
-  }, [gameMode, tiles, groups, sendBoardSnapshot]);
+    sendBoardSnapshot(tiles, getTileSize());
+  }, [gameMode, tiles, sendBoardSnapshot, getTileSize]);
 
   const currentLobbyPlayer = lobbyPlayers.find((player) => player.id === currentPeerId) || null;
   const spectatablePlayers = lobbyPlayers.filter(
@@ -422,20 +427,250 @@ function App() {
   const spectatedMinY = activeSpectatedTiles.length > 0
     ? Math.min(...activeSpectatedTiles.map((tile) => Number(tile?.y) || 0))
     : 0;
-  const spectateCoordinateScale = 0.66;
+  const spectateCoordinateScale = activeSpectatedSnapshot?.tileSize === 50 ? 0.8 : 0.667;
   const spectatePadding = 8;
+  const spectateTileSize = Number(activeSpectatedSnapshot?.tileSize);
+  const normalizedSpectateTileSize = Number.isFinite(spectateTileSize) ? spectateTileSize : 60;
   const normalizedSpectatedTiles = activeSpectatedTiles.map((tile) => ({
     ...tile,
     normalizedX: ((Number(tile?.x) || 0) - spectatedMinX) * spectateCoordinateScale + spectatePadding,
     normalizedY: ((Number(tile?.y) || 0) - spectatedMinY) * spectateCoordinateScale + spectatePadding,
   }));
+  const spectatedBoardWidth = normalizedSpectatedTiles.length > 0
+    ? Math.max(...normalizedSpectatedTiles.map((tile) => tile.normalizedX))
+    + (normalizedSpectateTileSize * spectateCoordinateScale)
+    + spectatePadding
+    : 0;
+  const spectatedBoardHeight = normalizedSpectatedTiles.length > 0
+    ? Math.max(...normalizedSpectatedTiles.map((tile) => tile.normalizedY))
+    + (normalizedSpectateTileSize * spectateCoordinateScale)
+    + spectatePadding
+    : 0;
 
-  // Subscribe to spectated player's board snapshot when selection changes or panel opens
+  const clampSpectateScale = useCallback((value) => Math.min(1.8, Math.max(0.5, value)), []);
+
+  const clampSpectateCameraToBoard = useCallback((nextCamera) => {
+    const viewport = spectatePlayAreaRef.current?.getBoundingClientRect();
+    const viewportWidth = viewport?.width || 0;
+    const viewportHeight = viewport?.height || 0;
+
+    if (viewportWidth <= 0 || viewportHeight <= 0 || spectatedBoardWidth <= 0 || spectatedBoardHeight <= 0) {
+      return { x: 0, y: 0, scale: clampSpectateScale(nextCamera.scale || 1) };
+    }
+
+    const scale = clampSpectateScale(nextCamera.scale || 1);
+    const scaledBoardWidth = spectatedBoardWidth * scale;
+    const scaledBoardHeight = spectatedBoardHeight * scale;
+
+    let clampedX;
+    let clampedY;
+
+    if (scaledBoardWidth <= viewportWidth) {
+      clampedX = (viewportWidth - scaledBoardWidth) / 2;
+    } else {
+      const minX = viewportWidth - scaledBoardWidth;
+      clampedX = Math.min(0, Math.max(minX, nextCamera.x));
+    }
+
+    if (scaledBoardHeight <= viewportHeight) {
+      clampedY = (viewportHeight - scaledBoardHeight) / 2;
+    } else {
+      const minY = viewportHeight - scaledBoardHeight;
+      clampedY = Math.min(0, Math.max(minY, nextCamera.y));
+    }
+
+    return {
+      x: clampedX,
+      y: clampedY,
+      scale,
+    };
+  }, [clampSpectateScale, spectatedBoardHeight, spectatedBoardWidth]);
+
+  const updateSpectateCamera = useCallback((nextCamera) => {
+    const clampedCamera = clampSpectateCameraToBoard(nextCamera);
+    spectateCameraRef.current = clampedCamera;
+    setSpectateCamera(clampedCamera);
+  }, [clampSpectateCameraToBoard]);
+
+  const fitSpectateCameraToBoard = useCallback(() => {
+    const viewport = spectatePlayAreaRef.current?.getBoundingClientRect();
+    const viewportWidth = viewport?.width || 0;
+    const viewportHeight = viewport?.height || 0;
+
+    if (viewportWidth <= 0 || viewportHeight <= 0 || spectatedBoardWidth <= 0 || spectatedBoardHeight <= 0) {
+      updateSpectateCamera({ x: 0, y: 0, scale: 1 });
+      return;
+    }
+
+    const fitScale = clampSpectateScale(Math.min(
+      viewportWidth / spectatedBoardWidth,
+      viewportHeight / spectatedBoardHeight,
+      1,
+    ));
+
+    const x = (viewportWidth - (spectatedBoardWidth * fitScale)) / 2;
+    const y = (viewportHeight - (spectatedBoardHeight * fitScale)) / 2;
+
+    updateSpectateCamera({ x, y, scale: fitScale });
+  }, [clampSpectateScale, spectatedBoardHeight, spectatedBoardWidth, updateSpectateCamera]);
+
+  const handleSpectateWheel = useCallback((event) => {
+    event.preventDefault();
+
+    const rect = spectatePlayAreaRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const localPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    const currentCamera = spectateCameraRef.current;
+    const nextScale = clampSpectateScale(currentCamera.scale * Math.exp(-event.deltaY * 0.0015));
+    if (nextScale === currentCamera.scale) return;
+
+    const focalBoardPoint = {
+      x: (localPoint.x - currentCamera.x) / currentCamera.scale,
+      y: (localPoint.y - currentCamera.y) / currentCamera.scale,
+    };
+
+    updateSpectateCamera({
+      x: localPoint.x - (focalBoardPoint.x * nextScale),
+      y: localPoint.y - (focalBoardPoint.y * nextScale),
+      scale: nextScale,
+    });
+  }, [clampSpectateScale, updateSpectateCamera]);
+
+  const handleSpectatePointerDown = useCallback((event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+    const rect = spectatePlayAreaRef.current?.getBoundingClientRect();
+    const localPoint = {
+      x: event.clientX - (rect?.left || 0),
+      y: event.clientY - (rect?.top || 0),
+    };
+
+    spectateActivePointersRef.current.set(event.pointerId, localPoint);
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    if (event.pointerType === 'touch' && spectateActivePointersRef.current.size >= 2) {
+      const [first, second] = Array.from(spectateActivePointersRef.current.values());
+      const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+      const dx = second.x - first.x;
+      const dy = second.y - first.y;
+      const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+      const currentCamera = spectateCameraRef.current;
+
+      spectateGestureRef.current = {
+        mode: 'pinch',
+        startDistance: distance,
+        startScale: currentCamera.scale,
+        focalBoardPoint: {
+          x: (midpoint.x - currentCamera.x) / currentCamera.scale,
+          y: (midpoint.y - currentCamera.y) / currentCamera.scale,
+        },
+      };
+      setIsPanningSpectateCamera(true);
+      return;
+    }
+
+    spectateGestureRef.current = {
+      mode: 'pan',
+      pointerId: event.pointerId,
+      startPointer: localPoint,
+      startCamera: { ...spectateCameraRef.current },
+    };
+    setIsPanningSpectateCamera(true);
+  }, []);
+
+  const handleSpectatePointerMove = useCallback((event) => {
+    if (!spectateActivePointersRef.current.has(event.pointerId)) return;
+
+    const rect = spectatePlayAreaRef.current?.getBoundingClientRect();
+    const localPoint = {
+      x: event.clientX - (rect?.left || 0),
+      y: event.clientY - (rect?.top || 0),
+    };
+    spectateActivePointersRef.current.set(event.pointerId, localPoint);
+
+    const gesture = spectateGestureRef.current;
+    if (!gesture.mode) return;
+
+    if (gesture.mode === 'pan') {
+      if (gesture.pointerId !== event.pointerId) return;
+      const deltaX = localPoint.x - gesture.startPointer.x;
+      const deltaY = localPoint.y - gesture.startPointer.y;
+      updateSpectateCamera({
+        x: gesture.startCamera.x + deltaX,
+        y: gesture.startCamera.y + deltaY,
+        scale: gesture.startCamera.scale,
+      });
+      return;
+    }
+
+    if (gesture.mode === 'pinch' && spectateActivePointersRef.current.size >= 2) {
+      const [first, second] = Array.from(spectateActivePointersRef.current.values());
+      const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+      const dx = second.x - first.x;
+      const dy = second.y - first.y;
+      const nextDistance = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nextScale = clampSpectateScale(gesture.startScale * (nextDistance / gesture.startDistance));
+
+      updateSpectateCamera({
+        x: midpoint.x - gesture.focalBoardPoint.x * nextScale,
+        y: midpoint.y - gesture.focalBoardPoint.y * nextScale,
+        scale: nextScale,
+      });
+    }
+  }, [clampSpectateScale, updateSpectateCamera]);
+
+  const handleSpectatePointerUp = useCallback((event) => {
+    spectateActivePointersRef.current.delete(event.pointerId);
+
+    if (spectateActivePointersRef.current.size === 0) {
+      spectateGestureRef.current = { mode: null };
+      setIsPanningSpectateCamera(false);
+    } else if (spectateActivePointersRef.current.size === 1 && spectateGestureRef.current.mode === 'pinch') {
+      const [remainingPointerId, remainingPoint] = Array.from(spectateActivePointersRef.current.entries())[0];
+      spectateGestureRef.current = {
+        mode: 'pan',
+        pointerId: remainingPointerId,
+        startPointer: remainingPoint,
+        startCamera: { ...spectateCameraRef.current },
+      };
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!multiplayerTabOpen || !activeSpectatedPlayer?.id) return;
+    spectateCameraRef.current = spectateCamera;
+  }, [spectateCamera]);
 
-    subscribeToBoardSnapshot(activeSpectatedPlayer.id);
-  }, [multiplayerTabOpen, activeSpectatedPlayer?.id, subscribeToBoardSnapshot]);
+  useEffect(() => {
+    if (!multiplayerTabOpen) return undefined;
+    const raf = requestAnimationFrame(() => {
+      fitSpectateCameraToBoard();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [fitSpectateCameraToBoard, activeSpectatedPlayer?.id, activeSpectatedSnapshot, multiplayerTabOpen]);
+
+  useEffect(() => {
+    const el = spectatePlayAreaRef.current;
+    if (!el) return undefined;
+
+    el.addEventListener('wheel', handleSpectateWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleSpectateWheel);
+    };
+  }, [handleSpectateWheel]);
+
+  const spectatedBoardTransformStyle = {
+    transform: `translate(${spectateCamera.x}px, ${spectateCamera.y}px) scale(${spectateCamera.scale})`,
+    transformOrigin: '0 0',
+  };
 
   useEffect(() => {
     if (spectatablePlayers.length === 0) {
@@ -1008,7 +1243,6 @@ function App() {
               onClick={() => {
                 setSpectatedPlayerIndex(0);
                 setMultiplayerTabOpen(true);
-                console.log('[Multiplayer Panel] playerBoardSnapshots:', playerBoardSnapshots);
               }}
               aria-label="Open multiplayer player list"
             >
@@ -1099,21 +1333,30 @@ function App() {
                         </p>
                       )}
                       {activeSpectatedPlayer && activeSpectatedSnapshot && (
-                        <div className="spectated-board">
-                          {normalizedSpectatedTiles.map((tile) => (
-                            <div
-                              key={tile.id}
-                              className="spectated-tile"
-                              style={{
-                                left: `${tile.normalizedX}px`,
-                                top: `${tile.normalizedY}px`,
-                              }}
-                            >
-                              <div className="tile-content">
-                                {tile.letter}
+                        <div
+                          ref={spectatePlayAreaRef}
+                          className={`spectated-board ${isPanningSpectateCamera ? 'camera-panning' : ''}`}
+                          onPointerDown={handleSpectatePointerDown}
+                          onPointerMove={handleSpectatePointerMove}
+                          onPointerUp={handleSpectatePointerUp}
+                          onPointerCancel={handleSpectatePointerUp}
+                        >
+                          <div className="spectated-board-content" style={spectatedBoardTransformStyle}>
+                            {normalizedSpectatedTiles.map((tile) => (
+                              <div
+                                key={tile.id}
+                                className="spectated-tile"
+                                style={{
+                                  left: `${tile.normalizedX}px`,
+                                  top: `${tile.normalizedY}px`,
+                                }}
+                              >
+                                <div className="tile-content">
+                                  {tile.letter}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
                       )}
                       {activeSpectatedPlayer && !activeSpectatedSnapshot && (
