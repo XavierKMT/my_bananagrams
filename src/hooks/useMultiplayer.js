@@ -263,7 +263,6 @@ export function useMultiplayer({
     }
 
     sharedBagRef.current = [];
-    playerBoardSnapshotsRef.current.clear();
 
     hostConnectionRef.current?.close();
     hostConnectionRef.current = null;
@@ -287,7 +286,6 @@ export function useMultiplayer({
     lobbyPlayersRef.current = [];
     setIsLobbyHost(false);
     sharedBagRef.current = [];
-    playerBoardSnapshotsRef.current.clear();
   }, []);
 
   const syncLobbyPlayers = useCallback((nextPlayers) => {
@@ -535,7 +533,6 @@ export function useMultiplayer({
 
         const removePlayer = () => {
           hostConnectionsRef.current.delete(connection.peer);
-          playerBoardSnapshotsRef.current.delete(connection.peer);
           const nextPlayers = lobbyPlayersRef.current.filter((player) => player.id !== connection.peer);
           syncLobbyPlayers(nextPlayers);
         };

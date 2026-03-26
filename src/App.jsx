@@ -113,6 +113,11 @@ function App() {
 
   const handleEnterLobby = useCallback(() => {
     setGameMode('multiplayer');
+    setMultiplayerCountdown(null);
+    setMultiplayerWinner(null);
+    setPlayerBoardSnapshots(new Map());
+    setSpectatedPlayerIndex(0);
+    setMultiplayerTabOpen(false);
     setScreen('lobby');
   }, []);
 
@@ -253,8 +258,12 @@ function App() {
     const remainingBagCount = Number(gameStartData?.remainingBagCount);
 
     setMultiplayerCountdown(null);
+    setMultiplayerWinner(null);
     setGameMode('multiplayer');
     setSinglePlayerWon(false);
+    setPlayerBoardSnapshots(new Map());
+    setSpectatedPlayerIndex(0);
+    setMultiplayerTabOpen(false);
     resetGroupingState();
     setDumpMode(false);
     centerCameraOnBoard();
@@ -409,9 +418,7 @@ function App() {
   }, [gameMode, tiles, sendBoardSnapshot, getTileSize]);
 
   const currentLobbyPlayer = lobbyPlayers.find((player) => player.id === currentPeerId) || null;
-  const spectatablePlayers = lobbyPlayers.filter(
-    (player) => player.id !== currentPeerId && player.status === 'In game',
-  );
+  const spectatablePlayers = lobbyPlayers.filter((player) => player.id !== currentPeerId);
   const activeSpectatedPlayer = spectatablePlayers.length > 0
     ? spectatablePlayers[Math.min(spectatedPlayerIndex, spectatablePlayers.length - 1)]
     : null;
@@ -1361,7 +1368,7 @@ function App() {
                       )}
                       {activeSpectatedPlayer && !activeSpectatedSnapshot && (
                         <p className="multiplayer-carousel-empty">
-                          Loading board...
+                          Couldn&apos;t load board...
                         </p>
                       )}
                     </div>
