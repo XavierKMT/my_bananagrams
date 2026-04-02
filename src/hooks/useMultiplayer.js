@@ -5,6 +5,14 @@ import { TILE_DISTRIBUTION } from '../constants';
 const READY_STATUS = 'Ready';
 const NOT_READY_STATUS = 'Not Ready';
 const IN_GAME_STATUS = 'In game';
+// const PEER_ICE_CONFIG = {
+//   config: {
+//     iceServers: [
+//       { urls: 'stun:stun.l.google.com:19302' },
+//       { urls: 'stun:stun1.l.google.com:19302' },
+//     ],
+//   },
+// };
 
 export function useMultiplayer({
   onEnterLobby,
@@ -27,6 +35,7 @@ export function useMultiplayer({
   const [currentPeerId, setCurrentPeerId] = useState('');
 
   const peerRef = useRef(null);
+  const currentPeerIdRef = useRef('');
   const hostConnectionRef = useRef(null);
   const hostConnectionsRef = useRef(new Map());
   const lobbyPlayersRef = useRef(lobbyPlayers);
@@ -280,6 +289,7 @@ export function useMultiplayer({
 
   const resetMultiplayerState = useCallback(() => {
     intentionalLeaveRef.current = false;
+    currentPeerIdRef.current = '';
     setCurrentPeerId('');
     setRoomCode('');
     setLobbyPlayers([]);
@@ -319,6 +329,7 @@ export function useMultiplayer({
 
     const createHostPeer = (attempt = 0) => {
       const nextRoomCode = generateRoomCode();
+      // const peer = new Peer(nextRoomCode, PEER_ICE_CONFIG);
       const peer = new Peer(nextRoomCode);
       peerRef.current = peer;
 
@@ -333,6 +344,7 @@ export function useMultiplayer({
           isReady: false,
           status: NOT_READY_STATUS,
         };
+        currentPeerIdRef.current = id;
         setCurrentPeerId(id);
         setRoomCode(id);
         syncLobbyPlayers([hostPlayer]);
@@ -394,7 +406,7 @@ export function useMultiplayer({
               });
 
               onMultiplayerDrawRef.current?.(
-                dealtTilesByPlayer.get(currentPeerId) || [],
+                dealtTilesByPlayer.get(currentPeerIdRef.current) || [],
                 remainingBagCount,
               );
 
@@ -561,7 +573,6 @@ export function useMultiplayer({
     broadcastWinState,
     broadcastPlayerAction,
     cleanupPeerConnections,
-    currentPeerId,
     drawFromSharedBag,
     generateRoomCode,
     multiplayerUsername,
@@ -590,12 +601,14 @@ export function useMultiplayer({
     setMultiplayerError('');
     setIsLobbyHost(false);
 
+    // const peer = new Peer(PEER_ICE_CONFIG);
     const peer = new Peer();
     peerRef.current = peer;
     let hasJoinedLobby = false;
     let forceReturnToMainMenu = null;
 
     peer.on('open', (id) => {
+      currentPeerIdRef.current = id;
       setCurrentPeerId(id);
       const connection = peer.connect(requestedRoomCode, { reliable: true });
       hostConnectionRef.current = connection;

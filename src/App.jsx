@@ -145,7 +145,8 @@ function App() {
     setMultiplayerCountdown(Math.ceil(seconds));
   }, []);
 
-  const placeTilesInVisibleRegion = useCallback((drawnTiles, existingTiles) => {
+  const placeTilesInVisibleRegion = useCallback((drawnTiles, existingTiles, options = {}) => {
+    const horizontalSpawnPaddingRatio = Number(options?.horizontalSpawnPaddingRatio) || 0;
     const tileSize = getTileSize();
     const boardSize = getBoardSize();
     const margin = 10;
@@ -157,10 +158,20 @@ function App() {
     const visibleRight = (viewportW - cameraX) / cameraScale;
     const visibleBottom = (viewportH - cameraY) / cameraScale;
 
-    const minX = Math.max(0, visibleLeft + margin);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+    const horizontalSpawnPadding = Math.max(0, visibleWidth * horizontalSpawnPaddingRatio);
+    const minX = Math.max(0, visibleLeft + margin + horizontalSpawnPadding);
     const minY = Math.max(0, visibleTop + margin);
-    const maxX = Math.min(boardSize - tileSize, visibleRight - margin - tileSize);
+    const maxX = Math.min(
+      boardSize - tileSize,
+      visibleRight - margin - tileSize - horizontalSpawnPadding,
+    );
     const maxY = Math.min(boardSize - tileSize, visibleBottom - margin - tileSize);
+
+    const spawnMinX = maxX >= minX ? minX : Math.max(0, visibleLeft + margin);
+    const spawnMaxX = maxX >= minX
+      ? maxX
+      : Math.min(boardSize - tileSize, visibleRight - margin - tileSize);
 
     const occupiedPositions = existingTiles.map((tile) => tile.position);
     const placedTiles = [];
@@ -182,7 +193,7 @@ function App() {
         const y = maxY - rowOffset * step;
         if (y < minY) break;
 
-        for (let x = minX; x <= maxX; x += step) {
+        for (let x = spawnMinX; x <= spawnMaxX; x += step) {
           if (isFree(x, y)) {
             const pos = { x, y };
             occupiedPositions.push(pos);
@@ -213,7 +224,9 @@ function App() {
     if (tilesToPlace.length > 0) {
       setTiles((previousTiles) => [
         ...previousTiles,
-        ...placeTilesInVisibleRegion(tilesToPlace, previousTiles),
+        ...placeTilesInVisibleRegion(tilesToPlace, previousTiles, {
+          horizontalSpawnPaddingRatio: 0.2,
+        }),
       ]);
     }
 
