@@ -10,6 +10,9 @@ export default function Lobby({
   currentPeerId,
   currentPlayerReady,
   startEnabled,
+  countdownActive,
+  gameType,
+  onGameTypeChange,
   onToggleReady,
   onStartGame,
   onBack,
@@ -19,7 +22,7 @@ export default function Lobby({
   return (
     <div className="menu-screen">
       <div className="menu-bg" />
-      <div className="menu-content multiplayer-card">
+      <div className={`menu-content multiplayer-card${countdownActive ? ' countdown-active' : ''}`}>
         <h3 className="menu-title">LOBBY</h3>
         <div className="room-code">Room Code: {roomCode}</div>
         <div className="lobby-note">Share this code to invite players</div>
@@ -44,16 +47,33 @@ export default function Lobby({
           ))}
         </div>
 
+        <div className="lobby-game-type-toggle" role="group" aria-label="Lobby game type">
+          <button
+            className={`lobby-game-type-btn${gameType === 'short' ? ' active' : ''}`}
+            onClick={() => onGameTypeChange('short')}
+            disabled={!isHost || countdownActive}
+          >
+            Short Game
+          </button>
+          <button
+            className={`lobby-game-type-btn${gameType === 'long' ? ' active' : ''}`}
+            onClick={() => onGameTypeChange('long')}
+            disabled={!isHost || countdownActive}
+          >
+            Long Game
+          </button>
+        </div>
+
         <div className="lobby-note">{isHost ? 'Host can start when everyone is ready' : 'Set your status, then wait for host to start'}</div>
 
         <div className="menu-buttons">
-          <button className="menu-action-btn" onClick={onToggleReady}>
+          <button className="menu-action-btn" onClick={onToggleReady} disabled={countdownActive}>
             {currentPlayerReady ? 'Unready' : 'Ready'}
           </button>
-          <button className="menu-action-btn" onClick={onStartGame} disabled={!startEnabled}>
+          <button className="menu-action-btn" onClick={onStartGame} disabled={!startEnabled || countdownActive}>
             Start Game
           </button>
-          <button className="menu-action-btn secondary" onClick={onBack}>
+          <button className="menu-action-btn secondary" onClick={onBack} disabled={countdownActive}>
             Leave Lobby
           </button>
         </div>
@@ -77,6 +97,9 @@ Lobby.propTypes = {
   currentPeerId: PropTypes.string.isRequired,
   currentPlayerReady: PropTypes.bool.isRequired,
   startEnabled: PropTypes.bool.isRequired,
+  countdownActive: PropTypes.bool.isRequired,
+  gameType: PropTypes.oneOf(['short', 'long']).isRequired,
+  onGameTypeChange: PropTypes.func.isRequired,
   onToggleReady: PropTypes.func.isRequired,
   onStartGame: PropTypes.func.isRequired,
   onBack: PropTypes.func.isRequired,

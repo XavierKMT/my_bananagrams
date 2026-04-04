@@ -5,6 +5,8 @@ import { TILE_DISTRIBUTION } from '../constants';
 const READY_STATUS = 'Ready';
 const NOT_READY_STATUS = 'Not Ready';
 const IN_GAME_STATUS = 'In game';
+const DEFAULT_GAME_TYPE = 'long';
+const VALID_GAME_TYPES = new Set(['short', 'long']);
 // const PEER_ICE_CONFIG = {
 //   config: {
 //     iceServers: [
@@ -33,12 +35,14 @@ export function useMultiplayer({
   const [lobbyPlayers, setLobbyPlayers] = useState([]);
   const [isLobbyHost, setIsLobbyHost] = useState(false);
   const [currentPeerId, setCurrentPeerId] = useState('');
+  const [multiplayerGameType, setMultiplayerGameType] = useState(DEFAULT_GAME_TYPE);
 
   const peerRef = useRef(null);
   const currentPeerIdRef = useRef('');
   const hostConnectionRef = useRef(null);
   const hostConnectionsRef = useRef(new Map());
   const lobbyPlayersRef = useRef(lobbyPlayers);
+  const multiplayerGameTypeRef = useRef(multiplayerGameType);
   const onEnterLobbyRef = useRef(onEnterLobby);
   const onGameStartRef = useRef(onGameStart);
   const onReturnToMenuRef = useRef(onReturnToMenu);
@@ -57,6 +61,10 @@ export function useMultiplayer({
   useEffect(() => {
     lobbyPlayersRef.current = lobbyPlayers;
   }, [lobbyPlayers]);
+
+  useEffect(() => {
+    multiplayerGameTypeRef.current = multiplayerGameType;
+  }, [multiplayerGameType]);
 
   useEffect(() => {
     onEnterLobbyRef.current = onEnterLobby;
@@ -221,7 +229,7 @@ export function useMultiplayer({
       return { ok: false, reason: 'No players are currently in game.' };
     }
 
-    if (sharedBagRef.current.length >= playersInGame.length) {
+    if (multiplayerGameTypeRef.current !== 'short' && sharedBagRef.current.length >= playersInGame.length) {
       return {
         ok: false,
         reason: 'Bananas is only available when fewer tiles than players remain in the bag.',
@@ -295,18 +303,27 @@ export function useMultiplayer({
     setLobbyPlayers([]);
     lobbyPlayersRef.current = [];
     setIsLobbyHost(false);
+    setMultiplayerGameType(DEFAULT_GAME_TYPE);
+    multiplayerGameTypeRef.current = DEFAULT_GAME_TYPE;
     sharedBagRef.current = [];
   }, []);
 
-  const syncLobbyPlayers = useCallback((nextPlayers) => {
+  const syncLobbyPlayers = useCallback((nextPlayers, nextGameType = multiplayerGameTypeRef.current) => {
+    const normalizedGameType = VALID_GAME_TYPES.has(String(nextGameType || '').trim().toLowerCase())
+      ? String(nextGameType).trim().toLowerCase()
+      : DEFAULT_GAME_TYPE;
+
     setLobbyPlayers(nextPlayers);
     lobbyPlayersRef.current = nextPlayers;
+    setMultiplayerGameType(normalizedGameType);
+    multiplayerGameTypeRef.current = normalizedGameType;
 
     hostConnectionsRef.current.forEach((connection) => {
       if (!connection.open) return;
       connection.send({
         type: 'lobby-update',
         players: nextPlayers,
+        gameType: normalizedGameType,
       });
     });
   }, []);
@@ -540,6 +557,7 @@ export function useMultiplayer({
             type: 'join-accepted',
             roomCode: peerRef.current?.id || '',
             players: nextPlayers,
+            gameType: multiplayerGameTypeRef.current,
           });
         });
 
@@ -647,21 +665,36 @@ export function useMultiplayer({
           window.clearTimeout(joinTimeout);
           setRoomCode(String(message.roomCode || requestedRoomCode));
           setLobbyPlayers(Array.isArray(message.players) ? message.players : []);
+          setMultiplayerGameType(
+            VALID_GAME_TYPES.has(String(message.gameType || '').trim().toLowerCase())
+              ? String(message.gameType).trim().toLowerCase()
+              : DEFAULT_GAME_TYPE,
+          );
           onEnterLobbyRef.current?.();
           return;
         }
 
         if (message.type === 'lobby-update') {
           setLobbyPlayers(Array.isArray(message.players) ? message.players : []);
+          setMultiplayerGameType(
+            VALID_GAME_TYPES.has(String(message.gameType || '').trim().toLowerCase())
+              ? String(message.gameType).trim().toLowerCase()
+              : DEFAULT_GAME_TYPE,
+          );
           return;
         }
 
         if (message.type === 'game-start') {
           const initialTiles = Array.isArray(message.initialTiles) ? message.initialTiles : [];
           const remainingBagCount = Number(message.remainingBagCount);
+          const gameType = VALID_GAME_TYPES.has(String(message.gameType || '').trim().toLowerCase())
+            ? String(message.gameType).trim().toLowerCase()
+            : DEFAULT_GAME_TYPE;
+          setMultiplayerGameType(gameType);
           onGameStartRef.current?.({
             initialTiles,
             remainingBagCount: Number.isFinite(remainingBagCount) ? remainingBagCount : 0,
+            gameType,
           });
           return;
         }
@@ -795,6 +828,15 @@ export function useMultiplayer({
     });
   }, [cleanupPeerConnections, multiplayerUsername, resetMultiplayerState, roomCodeInput]);
 
+  const updateMultiplayerGameType = useCallback((nextGameType) => {
+    if (!isLobbyHost) return;
+
+    const normalizedGameType = String(nextGameType || '').trim().toLowerCase();
+    if (!VALID_GAME_TYPES.has(normalizedGameType)) return;
+
+    syncLobbyPlayers(lobbyPlayersRef.current, normalizedGameType);
+  }, [isLobbyHost, syncLobbyPlayers]);
+
   const toggleReady = useCallback(() => {
     if (!currentPeerId) return;
 
@@ -877,6 +919,7 @@ export function useMultiplayer({
           type: 'game-start',
           initialTiles: allocatedTilesByPlayer.get(connection.peer) || [],
           remainingBagCount,
+          gameType: multiplayerGameTypeRef.current,
         });
       });
 
@@ -888,6 +931,7 @@ export function useMultiplayer({
       onGameStartRef.current?.({
         initialTiles: allocatedTilesByPlayer.get(currentPeerId) || [],
         remainingBagCount,
+        gameType: multiplayerGameTypeRef.current,
       });
       onBagCountUpdateRef.current?.(remainingBagCount);
     }, countdownSeconds * 1000);
@@ -1089,11 +1133,13 @@ export function useMultiplayer({
     lobbyPlayers,
     isLobbyHost,
     currentPeerId,
+    multiplayerGameType,
     allPlayersReady,
     currentPlayerReady,
     createRoom,
     joinRoom,
     toggleReady,
+    updateMultiplayerGameType,
     startGame,
     requestMultiplayerDraw,
     requestMultiplayerDump,

@@ -36,11 +36,33 @@
   flex-wrap: wrap;
 }
 
+.controls-left {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.controls-status {
+  flex: 1 1 auto;
+  display: flex;
+  height: 45px;
+  justify-content: center;
+  min-width: 0;
+}
+
+.controls-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .multiplayer-tab {
-  position: absolute;
-  top: 74px;
-  left: 24px;
-  z-index: 19;
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -53,6 +75,31 @@
   background: rgba(9, 22, 15, 0.9);
   backdrop-filter: blur(16px);
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
+}
+
+.game-timer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid rgba(214, 230, 215, 0.16);
+  border-radius: 10px;
+  background: rgba(7, 18, 13, 0.52);
+  backdrop-filter: blur(10px);
+}
+
+.game-timer-value {
+  display: block;
+  width: 100%;
+  text-align: center;
+  color: rgba(232, 241, 229, 0.9);
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
 }
 
 .multiplayer-tab.open {
@@ -76,7 +123,6 @@
   gap: 0.45rem;
   background: rgba(5, 12, 9, 0.44);
   backdrop-filter: blur(4px);
-  pointer-events: none;
 }
 
 .multiplayer-countdown-label {
@@ -554,7 +600,7 @@
 }
 
 .bag-info {
-  margin-right: auto;
+  margin: 0;
   padding: 0.75rem 0.95rem;
   border: 1px solid rgba(214, 230, 215, 0.16);
   border-radius: 10px;
@@ -633,8 +679,9 @@
 .burger-menu {
   display: none;
   position: absolute;
-  top: calc(100% + 8px);
+  top: 0;
   left: 0;
+  transform: translateY(calc(45px + 8px));
   width: min(320px, calc(100vw - 48px));
   flex-direction: column;
   gap: 8px;
@@ -654,8 +701,9 @@
 .controls-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  margin-left: auto;
+  /* width: 80px; */
 }
 
 /* Exit button: always visible on desktop, hidden on mobile (lives in burger menu instead) */
@@ -686,9 +734,73 @@
 .controls-actions .btn {
   flex: 0 0 auto;
   min-width: unset;
-  width: auto;
-  /* padding: 0.65rem 0.9rem; */
+  /* width: 100px; */
+  width: min-content;
   font-size: 0.82rem;
+}
+
+.singleplayer-mode-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 12, 9, 0.34);
+  backdrop-filter: blur(6px);
+}
+
+.singleplayer-mode-card {
+  width: min(460px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(214, 230, 215, 0.18);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(14, 32, 23, 0.97), rgba(8, 19, 14, 0.97));
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.34);
+  text-align: center;
+}
+
+.singleplayer-mode-card h3 {
+  margin: 0;
+  color: rgba(238, 245, 235, 0.96);
+  font-size: clamp(1.35rem, 4vw, 1.7rem);
+  letter-spacing: 0.04em;
+}
+
+.singleplayer-mode-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.singleplayer-mode-btn {
+  flex: 1 1 0;
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.85rem 0.9rem;
+}
+
+.singleplayer-mode-btn-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.singleplayer-mode-btn-description {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: rgba(220, 234, 221, 0.78);
+  line-height: 1.25;
+  text-align: center;
 }
 
 @media (max-width: 768px) {
@@ -697,15 +809,33 @@
     left: 14px;
     right: 14px;
     gap: 10px;
+    align-items: flex-start;
     flex-wrap: nowrap;
-    align-items: center;
+  }
+
+  .controls-left {
+    flex: 0 0 auto;
+  }
+
+  .controls-right {
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .controls-status {
+    flex: 1 1 auto;
+    width: auto;
+    justify-content: center;
   }
 
   .multiplayer-tab {
-    top: 60px;
-    left: 14px;
     width: 45px;
     height: 45px;
+  }
+
+  .game-timer {
+    min-width: 78px;
+    padding: 0.5rem 0.7rem;
   }
 
   .burger-btn {
@@ -749,12 +879,23 @@
   }
 
   .burger-menu {
-    right: 0;
-    width: auto;
+    left: 0;
+    right: auto;
+    width: min(320px, calc(100vw - 28px));
+    max-width: calc(100vw - 54px);
   }
 
   .controls-actions {
-    margin-left: auto;
+    flex-wrap: wrap;
+  }
+
+  .singleplayer-mode-card {
+    width: min(360px, calc(100vw - 28px));
+    padding: 1.2rem;
+  }
+
+  .singleplayer-mode-actions {
+    flex-direction: column;
   }
 
   .hero-copy {
