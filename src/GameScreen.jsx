@@ -64,6 +64,8 @@ function GameScreen({
   screenToBoard,
   onDumpSelect,
 }) {
+  const hasWinner = singlePlayerWon || Boolean(multiplayerWinner);
+
   return (
     <div className="game-container">
       {gameMode === 'multiplayer' && (
@@ -80,6 +82,7 @@ function GameScreen({
           spectatablePlayers={spectatablePlayers}
           activeSpectatedPlayer={activeSpectatedPlayer}
           activeSpectatedSnapshot={activeSpectatedSnapshot}
+          multiplayerWinner={multiplayerWinner}
           spectatePlayAreaRef={spectatePlayAreaRef}
           isPanningSpectateCamera={isPanningSpectateCamera}
           onSpectatePointerDown={onSpectatePointerDown}
@@ -151,27 +154,29 @@ function GameScreen({
         <div className="controls-right">
           <GameTimer isRunning={isTimerRunning} resetKey={timerResetKey} />
 
-          <div className="controls-actions">
-            {(hasUngroupedTiles || dumpMode) && (
-              <button
-                className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
-                onClick={onToggleDumpMode}
-                disabled={bagTileCount < 3 || Boolean(multiplayerWinner)}
-              >
-                {dumpMode ? 'Cancel Dump' : 'DUMP'}
-              </button>
-            )}
-            {showPeelButton && !multiplayerWinner && (
-              <button className="btn" onClick={onPeel}>
-                PEEL
-              </button>
-            )}
-            {showBananasButton && !multiplayerWinner && (
-              <button className="btn" onClick={onBananas}>
-                BANANAS
-              </button>
-            )}
-          </div>
+          {!hasWinner && (
+            <div className="controls-actions">
+              {(hasUngroupedTiles || dumpMode) && (
+                <button
+                  className={`btn ${dumpMode ? 'dump-mode-active' : ''}`.trim()}
+                  onClick={onToggleDumpMode}
+                  disabled={bagTileCount < 3}
+                >
+                  {dumpMode ? 'Cancel Dump' : 'DUMP'}
+                </button>
+              )}
+              {showPeelButton && (
+                <button className="btn" onClick={onPeel}>
+                  PEEL
+                </button>
+              )}
+              {showBananasButton && (
+                <button className="btn" onClick={onBananas}>
+                  BANANAS
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

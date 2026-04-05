@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { ChevronLeft, ChevronRight, Crown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Crown, Trophy } from 'lucide-react';
 
 function MultiplayerPanel({
   multiplayerTabOpen,
@@ -20,7 +20,17 @@ function MultiplayerPanel({
   onSpectatePointerUp,
   spectatedBoardTransformStyle,
   normalizedSpectatedTiles,
+  multiplayerWinner,
 }) {
+  const winnerName = typeof multiplayerWinner === 'string'
+    ? multiplayerWinner.replace(/\s+has won!?$/i, '').trim()
+    : '';
+  const isSpectatedWinner = Boolean(
+    activeSpectatedPlayer?.username
+    && winnerName
+    && activeSpectatedPlayer.username.trim().toLowerCase() === winnerName.toLowerCase(),
+  );
+
   return (
     <>
       {multiplayerTabOpen && (
@@ -77,15 +87,17 @@ function MultiplayerPanel({
                   <p className="multiplayer-panel-eyebrow">Spectating</p>
                   <h3 className="multiplayer-carousel-title">
                     {activeSpectatedPlayer ? (
-                      <>
-                        {activeSpectatedPlayer.username}
-                        {activeSpectatedPlayer.isHost && (
-                          <>
-                            {' '}
-                            <Crown size={16} aria-label="Host" />
-                          </>
+                      <span className="multiplayer-carousel-player-name">
+                        <span>{activeSpectatedPlayer.username}</span>
+                        {isSpectatedWinner && (
+                          <Trophy
+                            size={16}
+                            aria-label="Winner"
+                            className="multiplayer-winner-icon"
+                          />
                         )}
-                      </>
+                        {activeSpectatedPlayer.isHost && <Crown size={16} aria-label="Host" />}
+                      </span>
                     ) : 'No Other Players In Game'}
                   </h3>
                 </div>

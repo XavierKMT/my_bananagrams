@@ -22,7 +22,7 @@ export default function Lobby({
   return (
     <div className="menu-screen">
       <div className="menu-bg" />
-      <div className={`menu-content multiplayer-card${countdownActive ? ' countdown-active' : ''}`}>
+      <div className="menu-content multiplayer-card">
         <h3 className="menu-title">LOBBY</h3>
         <div className="room-code">Room Code: {roomCode}</div>
         <div className="lobby-note">Share this code to invite players</div>

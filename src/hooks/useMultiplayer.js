@@ -497,7 +497,7 @@ export function useMultiplayer({
           if (message.type === 'board-snapshot') {
             const playerId = String(connection.peer || '').trim();
             const snapshot = message.snapshot;
-            console.log('[Board] Host received board snapshot from player:', playerId, snapshot);
+            // console.log('[Board] Host received board snapshot from player:', playerId, snapshot);
             if (playerId && snapshot) {
               playerBoardSnapshotsRef.current.set(playerId, snapshot);
               onBoardSnapshotRef.current?.(playerId, snapshot);
@@ -768,7 +768,7 @@ export function useMultiplayer({
         if (message.type === 'board-data') {
           const playerId = String(message.playerId || '').trim();
           const snapshot = message.snapshot;
-          console.log('[Board] User received board data from host for player:', playerId, snapshot);
+          // console.log('[Board] User received board data from host for player:', playerId, snapshot);
           if (playerId && snapshot) {
             playerBoardSnapshotsRef.current.set(playerId, snapshot);
             onBoardSnapshotRef.current?.(playerId, snapshot);
@@ -1072,7 +1072,7 @@ export function useMultiplayer({
       return;
     }
 
-    console.log('[Board] User sending board snapshot to host:', snapshot);
+    // console.log('[Board] User sending board snapshot to host:', snapshot);
     if (!hostConnectionRef.current?.open) return;
     hostConnectionRef.current.send({
       type: 'board-snapshot',

@@ -144,56 +144,6 @@
   text-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
 }
 
-.multiplayer-winner-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 96;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(4, 10, 7, 0.72);
-  backdrop-filter: blur(8px);
-}
-
-.multiplayer-winner-modal {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  padding: 2.5rem 2.25rem 2rem;
-  border: 1px solid rgba(214, 230, 215, 0.2);
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(14, 32, 23, 0.98), rgba(8, 19, 14, 0.98));
-  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.52);
-  max-width: min(420px, calc(100vw - 48px));
-  width: 100%;
-  text-align: center;
-}
-
-.multiplayer-winner-eyebrow {
-  margin: 0;
-  color: rgba(197, 217, 199, 0.72);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.multiplayer-winner-message {
-  margin: 0;
-  color: rgba(242, 248, 238, 0.98);
-  font-size: clamp(1.35rem, 6vw, 2rem);
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
-  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
-.multiplayer-winner-btn {
-  margin-top: 0.5rem;
-  width: 100%;
-}
-
 .multiplayer-panel-overlay {
   position: absolute;
   inset: 0;
@@ -374,6 +324,18 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   overflow-wrap: anywhere;
+}
+
+.multiplayer-carousel-player-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.multiplayer-winner-icon {
+  color: rgba(245, 205, 93, 0.96);
 }
 
 .multiplayer-carousel-nav {
@@ -723,12 +685,6 @@
   box-sizing: border-box;
   font-size: 0.82rem;
   padding: 0.65rem 0.85rem;
-}
-
-.burger-menu .bag-info {
-  width: 100%;
-  text-align: center;
-  box-sizing: border-box;
 }
 
 .controls-actions .btn {
