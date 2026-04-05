@@ -1,5 +1,6 @@
 {
   "name": "bananagrams",
+  "homepage": "https://xavierkmt.github.io/my_bananagrams/",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,10 +8,11 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
-    "gh-pages": "^6.3.0",
     "lucide-react": "^1.0.1",
     "peerjs": "^1.5.5",
     "prop-types": "^15.8.1",
