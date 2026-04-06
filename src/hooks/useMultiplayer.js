@@ -7,14 +7,14 @@ const NOT_READY_STATUS = 'Not Ready';
 const IN_GAME_STATUS = 'In game';
 const DEFAULT_GAME_TYPE = 'long';
 const VALID_GAME_TYPES = new Set(['short', 'long']);
-const PEER_ICE_CONFIG = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ],
-  },
-};
+// const PEER_ICE_CONFIG = {
+//   config: {
+//     iceServers: [
+//       { urls: 'stun:stun.l.google.com:19302' },
+//       { urls: 'stun:stun1.l.google.com:19302' },
+//     ],
+//   },
+// };
 
 export function useMultiplayer({
   onEnterLobby,
@@ -346,8 +346,8 @@ export function useMultiplayer({
 
     const createHostPeer = (attempt = 0) => {
       const nextRoomCode = generateRoomCode();
-      const peer = new Peer(nextRoomCode, PEER_ICE_CONFIG);
-      // const peer = new Peer(nextRoomCode);
+      // const peer = new Peer(nextRoomCode, PEER_ICE_CONFIG);
+      const peer = new Peer(nextRoomCode);
       peerRef.current = peer;
 
       let opened = false;
@@ -619,8 +619,8 @@ export function useMultiplayer({
     setMultiplayerError('');
     setIsLobbyHost(false);
 
-    const peer = new Peer(PEER_ICE_CONFIG);
-    // const peer = new Peer();
+    // const peer = new Peer(PEER_ICE_CONFIG);
+    const peer = new Peer();
     peerRef.current = peer;
     let hasJoinedLobby = false;
     let forceReturnToMainMenu = null;
